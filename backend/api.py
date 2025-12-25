@@ -1,9 +1,10 @@
-import logging
+import os, logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query
 from utils.repoUtil import RepoUtil
 
-from config import Config, APP_NAME, APP_VERSION
+from const.config import Config, APP_NAME, APP_VERSION
+from const.const import Const
 
 logger = logging.getLogger(__name__)
 
@@ -62,3 +63,41 @@ async def get_repo_tree(path: str = Query(None, description="Local path to gener
 
     repo_tree = RepoUtil.build_tree(path)
     return repo_tree
+
+
+@app.get("/value_files")
+async def get_valuable_files(path: str = Query(None, description="Local path to scan for valuable files")):
+    """Get list of valuable files in the repository starting from the given local path"""
+
+    if path is None:
+        return {"error": "Path query parameter is required."}
+
+    if not os.path.exists(path):
+        return {"error": f"Path '{path}' does not exist."}
+
+    valuable_files = RepoUtil.repo_filter(path)
+    return {"root_path": path, "valuable_files": valuable_files}
+
+
+@app.get("/file_content")
+async def get_file_content(
+    root: str = Query(None, description="Root path of the repository"),
+    path: str = Query(None, description="File path relative to the root")
+):
+    """Get content of a specific file given its path relative to root"""
+
+    if root is None or path is None:
+        return {"error": "Both root and path query parameters are required."}
+
+    if not os.path.exists(root):
+        return {"error": f"Root path '{root}' does not exist."}
+
+    full_path = os.path.join(root, path)
+    if not os.path.exists(full_path):
+        return {"error": f"File path '{full_path}' does not exist."}
+
+    content = RepoUtil.file_content(root, path)
+    if content is None:
+        return {"error": f"Could not read content of file '{full_path}'."}
+
+    return {"file_path": full_path, "content": content}

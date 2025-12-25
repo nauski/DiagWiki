@@ -22,7 +22,7 @@ import uvicorn
 
 
 if __name__ == "__main__":
-    from config import Config
+    from const.config import Config
     
     logger.info(f"Starting {Config.APP_NAME} API on port {Config.PORT}")
     logger.info(f"Environment: {Config.ENVIRONMENT}")
