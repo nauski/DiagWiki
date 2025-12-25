@@ -14,8 +14,8 @@ class Const:
 
     TEXT_SPLIT_CONFIG = {
         "split_by": "word",
-        "chunk_size": 350,
-        "chunk_overlap": 100
+        "chunk_size": 800,  
+        "chunk_overlap": 150  
     }
 
     GENERATION_MODEL = "qwen3-coder:30b"
