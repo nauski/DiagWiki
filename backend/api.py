@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from utils.repoUtil import RepoUtil
 from utils.dataPipeline import check_ollama_model_exists, get_all_ollama_models, DataPipeline, generate_db_name
+from utils.wiki_generator import WikiGenerator
 
 from const.config import Config, APP_NAME, APP_VERSION
 from const.const import Const
@@ -120,68 +121,6 @@ async def list_available_models():
         "embedding_model_available": check_ollama_model_exists(embedding_model),
         "generation_model_available": check_ollama_model_exists(generation_model)
     }
-
-@app.post("/transform")
-async def transform_documents(
-    folder_path: str = Query(..., description="Path to folder containing documents to process"),
-    extensions: str = Query(None, description="Comma-separated file extensions (e.g., '.py,.md')")
-):
-    """
-    Transform documents from a folder: collect files, split text, generate embeddings, and save to LocalDB.
-    
-    Database name is automatically generated from the folder path for consistency.
-    
-    Args:
-        folder_path: Path to folder containing documents
-        extensions: Optional comma-separated file extensions to filter (default: all supported)
-    
-    Returns:
-        Statistics about the transformation process including the generated database name
-    """
-    try:
-        logger.info(f"Starting document transformation for folder: {folder_path}")
-        
-        # Validate folder exists
-        if not os.path.exists(folder_path):
-            raise HTTPException(status_code=404, detail=f"Folder not found: {folder_path}")
-        
-        if not os.path.isdir(folder_path):
-            raise HTTPException(status_code=400, detail=f"Path is not a directory: {folder_path}")
-        
-        # Generate database name from folder path
-        db_name = generate_db_name(folder_path)
-        
-        # Parse extensions if provided
-        allowed_extensions = None
-        if extensions:
-            allowed_extensions = [ext.strip() for ext in extensions.split(',')]
-            logger.info(f"Filtering for extensions: {allowed_extensions}")
-        
-        # Initialize pipeline and process folder
-        pipeline = DataPipeline(
-            db_name=db_name,
-            embedder_model=Const.EMBEDDING_MODEL,
-            text_splitter_config=Const.TEXT_SPLIT_CONFIG
-        )
-        logger.info("Initialized DataPipeline")
-        
-        # Process folder (collect, transform, save)
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        stats = pipeline.process_folder(
-            folder_path=folder_path,
-            allowed_extensions=allowed_extensions,
-            data_dir=data_dir
-        )
-        
-        logger.info(f"Transform completed: {stats['chunks_with_embeddings']}/{stats['transformed_chunk_count']} chunks with embeddings")
-        return stats
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error during transformation: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Transformation failed: {str(e)}")
-
 
 @app.post("/initWiki")
 async def init_wiki(
@@ -382,6 +321,7 @@ class WikiPageRequest(BaseModel):
     page_description: str = Field(..., description="Description of what the page should cover")
     relevant_files: List[str] = Field(..., description="List of relevant file paths for this page")
     language: str = Field("en", description="Language code")
+    page_id: Optional[str] = Field(None, description="Optional page ID for caching (defaults to sanitized page_title)")
 
 
 @app.post("/generateWikiStructure")
@@ -401,7 +341,7 @@ async def generate_wiki_structure(request: WikiStructureRequest = Body(...)):
         request: WikiStructureRequest with root_path, comprehensive flag, and language
         
     Returns:
-        XML structure defining wiki pages and sections
+        XML structure defining wiki pages and sections with cache information
     """
     try:
         logger.info(f"Generating wiki structure for: {request.root_path}")
@@ -410,262 +350,17 @@ async def generate_wiki_structure(request: WikiStructureRequest = Body(...)):
         if not os.path.exists(request.root_path):
             raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
         
-        # Initialize RAG for this folder
-        from utils.rag import RAG
-        db_name = generate_db_name(request.root_path)
+        # Use WikiGenerator for all wiki generation logic
         data_dir = os.path.join(os.path.dirname(__file__), "data")
-        db_path = os.path.join(data_dir, db_name)
+        wiki_gen = WikiGenerator(root_path=request.root_path, data_dir=data_dir)
         
-        # Check if database exists, if not create it
-        if not os.path.exists(db_path):
-            logger.info(f"Database not found for {request.root_path}, creating...")
-            pipeline = DataPipeline(
-                db_name=db_name,
-                embedder_model=Const.EMBEDDING_MODEL,
-                text_splitter_config=Const.TEXT_SPLIT_CONFIG
-            )
-            result = pipeline.process_folder(
-                folder_path=request.root_path,
-                data_dir=data_dir
-            )
-            logger.info(f"Database created: {result}")
-        
-        # Initialize RAG
-        from utils.rag import RAG
-        rag = RAG()
-        rag.load_database(db_path)
-        logger.info("RAG initialized for wiki structure generation")
-        
-        # Generate file tree
-        file_tree = RepoUtil.build_tree(request.root_path)
-        logger.info("File tree generated")
-        
-        # Read README if exists
-        readme_content = ""
-        readme_paths = ["README.md", "README.MD", "readme.md", "README.txt", "README"]
-        for readme_name in readme_paths:
-            readme_path = os.path.join(request.root_path, readme_name)
-            if os.path.exists(readme_path):
-                try:
-                    with open(readme_path, 'r', encoding='utf-8') as f:
-                        readme_content = f.read()
-                    logger.info(f"README found: {readme_name}")
-                    break
-                except Exception as e:
-                    logger.warning(f"Error reading README: {e}")
-        
-        # Use RAG to gather codebase insights
-        logger.info("Querying RAG for codebase analysis...")
-        rag_insights = []
-        
-        analysis_queries = [
-            "What are the main components, modules, and their purposes in this codebase?",
-            "What is the system architecture and how are different parts connected?",
-            "What are the key features and core functionality provided?",
-            "What APIs, endpoints, or interfaces are exposed?",
-            "What data models, schemas, or data structures are used?"
-        ]
-        
-        for query in analysis_queries:
-            try:
-                result = rag.call(
-                    query=query,
-                    top_k=5,
-                    use_reranking=True
-                )
-                rag_insights.append({
-                    "query": query,
-                    "answer": result.answer,
-                    "sources": [doc.text[:300] for doc in result.documents[:3]]
-                })
-                logger.info(f"RAG query completed: {query[:50]}...")
-            except Exception as e:
-                logger.warning(f"RAG query failed: {e}")
-        
-        # Get folder name for context
-        folder_name = os.path.basename(request.root_path)
-        
-        # Language mapping
-        language_names = {
-            'en': 'English',
-            'ja': 'Japanese (日本語)',
-            'zh': 'Mandarin Chinese (中文)',
-            'zh-tw': 'Traditional Chinese (繁體中文)',
-            'es': 'Spanish (Español)',
-            'kr': 'Korean (한국어)',
-            'vi': 'Vietnamese (Tiếng Việt)',
-            'pt-br': 'Brazilian Portuguese (Português Brasileiro)',
-            'fr': 'Français (French)',
-            'ru': 'Русский (Russian)'
-        }
-        language_name = language_names.get(request.language, 'English')
-        
-        # Create the prompt
-        if request.comprehensive:
-            structure_instructions = """
-Create a structured wiki with the following main sections:
-- Overview (general information about the project)
-- System Architecture (how the system is designed)
-- Core Features (key functionality)
-- Data Management/Flow: If applicable, how data is stored, processed, accessed, and managed
-- Frontend Components (UI elements, if applicable)
-- Backend Systems (server-side components)
-- Model Integration (AI model connections, if applicable)
-- Deployment/Infrastructure (how to deploy, infrastructure)
-- Extensibility and Customization: If supported, explain how to extend or customize
-
-Each section should contain relevant pages. Return XML with sections and pages.
-
-<wiki_structure>
-  <title>[Overall title for the wiki]</title>
-  <description>[Brief description of the repository]</description>
-  <sections>
-    <section id="section-1">
-      <title>[Section title]</title>
-      <pages>
-        <page_ref>page-1</page_ref>
-        <page_ref>page-2</page_ref>
-      </pages>
-      <subsections>
-        <section_ref>section-2</section_ref>
-      </subsections>
-    </section>
-  </sections>
-  <pages>
-    <page id="page-1">
-      <title>[Page title]</title>
-      <description>[Brief description]</description>
-      <importance>high|medium|low</importance>
-      <relevant_files>
-        <file_path>[Path to relevant file]</file_path>
-      </relevant_files>
-      <related_pages>
-        <related>page-2</related>
-      </related_pages>
-      <parent_section>section-1</parent_section>
-    </page>
-  </pages>
-</wiki_structure>"""
-            page_count = "8-12"
-        else:
-            structure_instructions = """
-Return your analysis in the following XML format:
-
-<wiki_structure>
-  <title>[Overall title for the wiki]</title>
-  <description>[Brief description of the repository]</description>
-  <pages>
-    <page id="page-1">
-      <title>[Page title]</title>
-      <description>[Brief description]</description>
-      <importance>high|medium|low</importance>
-      <relevant_files>
-        <file_path>[Path to relevant file]</file_path>
-      </relevant_files>
-      <related_pages>
-        <related>page-2</related>
-      </related_pages>
-    </page>
-  </pages>
-</wiki_structure>"""
-            page_count = "4-6"
-        
-        # Build RAG insights section
-        rag_insights_text = ""
-        if rag_insights:
-            rag_insights_text = "\n\n3. Codebase Analysis (from RAG retrieval):\n<rag_analysis>\n"
-            for idx, insight in enumerate(rag_insights, 1):
-                rag_insights_text += f"\nQuestion {idx}: {insight['query']}\n"
-                rag_insights_text += f"Answer: {insight['answer']}\n"
-                if insight['sources']:
-                    rag_insights_text += "Key code snippets:\n"
-                    for src in insight['sources']:
-                        rag_insights_text += f"- {src}\n"
-            rag_insights_text += "</rag_analysis>"
-        
-        prompt = f"""Analyze this folder {folder_name} and create a wiki structure for it.
-
-1. The complete file tree of the project:
-<file_tree>
-{file_tree}
-</file_tree>
-
-2. The README file of the project:
-<readme>
-{readme_content if readme_content else "No README found"}
-</readme>{rag_insights_text}
-
-I want to create a wiki for this codebase. Determine the most logical structure for a wiki based on the content.
-
-IMPORTANT: Use the RAG analysis insights above to understand the codebase's actual components, architecture, and features. The relevant_files in your structure should reference the actual source files mentioned in the RAG analysis.
-
-IMPORTANT: The wiki content will be generated in {language_name} language.
-
-When designing the wiki structure, include pages that would benefit from visual diagrams, such as:
-- Architecture overviews
-- Data flow descriptions
-- Component relationships
-- Process workflows
-- State machines
-- Class hierarchies
-
-{structure_instructions}
-
-IMPORTANT FORMATTING INSTRUCTIONS:
-- Return ONLY the valid XML structure specified above
-- DO NOT wrap the XML in markdown code blocks (no ``` or ```xml)
-- DO NOT include any explanation text before or after the XML
-- Ensure the XML is properly formatted and valid
-- Start directly with <wiki_structure> and end with </wiki_structure>
-
-IMPORTANT:
-1. Create {page_count} pages that would make a {'comprehensive' if request.comprehensive else 'concise'} wiki for this codebase
-2. Each page should focus on a specific aspect (e.g., architecture, key features, setup)
-3. The relevant_files should be actual files from the codebase that would be used to generate that page
-4. Return ONLY valid XML with the structure specified above, with no markdown code block delimiters"""
-        
-        # Use LLM to generate structure
-        from adalflow.components.model_client.ollama_client import OllamaClient
-        from adalflow.core.types import ModelType
-        
-        model = OllamaClient()
-        model_kwargs = {
-            "model": Const.GENERATION_MODEL,
-            "options": {
-                "temperature": 0.7,
-                "num_ctx": 8192
-            }
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
+        result = wiki_gen.generate_structure(
+            language=request.language,
+            comprehensive=request.comprehensive,
+            use_cache=True
         )
         
-        logger.info("Calling LLM to generate wiki structure...")
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract content from Ollama ChatResponse
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            wiki_structure = response.message.content
-        elif hasattr(response, 'data'):
-            wiki_structure = response.data
-        elif isinstance(response, dict):
-            wiki_structure = response.get('message', {}).get('content', '')
-        else:
-            logger.warning(f"Unexpected response type: {type(response)}")
-            wiki_structure = str(response)
-        
-        logger.info(f"Wiki structure generated ({len(wiki_structure)} chars)")
-        
-        return {
-            "status": "success",
-            "root_path": request.root_path,
-            "comprehensive": request.comprehensive,
-            "language": request.language,
-            "wiki_structure": wiki_structure
-        }
+        return result
         
     except HTTPException:
         raise
@@ -690,7 +385,7 @@ async def generate_wiki_page(request: WikiPageRequest = Body(...)):
         request: WikiPageRequest with page details and relevant files
         
     Returns:
-        Markdown content for the wiki page
+        Markdown content for the wiki page with cache information
     """
     try:
         logger.info(f"Generating wiki page: {request.page_title}")
@@ -699,248 +394,23 @@ async def generate_wiki_page(request: WikiPageRequest = Body(...)):
         if not os.path.exists(request.root_path):
             raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
         
-        # Initialize RAG
-        from utils.rag import RAG
-        db_name = generate_db_name(request.root_path)
+        # Use WikiGenerator for all wiki page generation logic
         data_dir = os.path.join(os.path.dirname(__file__), "data")
-        db_path = os.path.join(data_dir, db_name)
+        wiki_gen = WikiGenerator(root_path=request.root_path, data_dir=data_dir)
         
-        if not os.path.exists(db_path):
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Database not found for {request.root_path}. Please run /generateWikiStructure first."
-            )
+        # Generate page_id from request if available (for better caching)
+        page_id = getattr(request, 'page_id', None)
         
-        rag = RAG()
-        rag.load_database(db_path)
-        logger.info(f"RAG initialized for page generation: {request.page_title}")
-        
-        # Generate RAG queries based on page topic and description
-        rag_queries = [
-            f"What is {request.page_title}? {request.page_description}",
-            f"How does {request.page_title} work? Explain the implementation details.",
-            f"What are the key components and functions related to {request.page_title}?",
-            f"What are the data structures, classes, or APIs for {request.page_title}?",
-            f"Show code examples and usage patterns for {request.page_title}."
-        ]
-        
-        # Perform RAG queries to gather comprehensive context
-        logger.info(f"Performing {len(rag_queries)} RAG queries for comprehensive context...")
-        rag_results = []
-        all_retrieved_docs = []
-        
-        for query in rag_queries:
-            try:
-                result = rag.call(
-                    query=query,
-                    top_k=8,  # Get more docs for comprehensive coverage
-                    use_reranking=True
-                )
-                rag_results.append({
-                    "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
-                })
-                all_retrieved_docs.extend(result.documents)
-                logger.info(f"RAG query completed: {query[:60]}...")
-            except Exception as e:
-                logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
-        
-        # Deduplicate documents by file path and keep most relevant
-        seen_paths = {}
-        unique_docs = []
-        for doc in all_retrieved_docs:
-            file_path = doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'
-            if file_path not in seen_paths:
-                seen_paths[file_path] = doc
-                unique_docs.append(doc)
-        
-        logger.info(f"Retrieved {len(unique_docs)} unique documents from {len(all_retrieved_docs)} total results")
-        
-        # Also load any explicitly requested files
-        file_contents = []
-        for file_path in request.relevant_files[:5]:  # Limit to 5 explicit files
-            full_path = os.path.join(request.root_path, file_path) if not os.path.isabs(file_path) else file_path
-            if os.path.exists(full_path) and os.path.isfile(full_path):
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    file_contents.append({
-                        "path": file_path,
-                        "content": content[:3000]  # Limit each file to 3000 chars
-                    })
-                    logger.info(f"Loaded explicit file: {file_path}")
-                except Exception as e:
-                    logger.warning(f"Error reading file {file_path}: {e}")
-        
-        # Build comprehensive context from RAG results
-        rag_context = "\n\n".join([
-            f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
-            for r in rag_results
-        ])
-        
-        retrieved_sources = "\n\n".join([
-            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:800]}"
-            for i, doc in enumerate(unique_docs[:15])  # Limit to top 15 sources
-        ])
-        
-        # Language mapping
-        language_names = {
-            'en': 'English',
-            'ja': 'Japanese (日本語)',
-            'zh': 'Mandarin Chinese (中文)',
-            'zh-tw': 'Traditional Chinese (繁體中文)',
-            'es': 'Spanish (Español)',
-            'kr': 'Korean (한국어)',
-            'vi': 'Vietnamese (Tiếng Việt)',
-            'pt-br': 'Brazilian Portuguese (Português Brasileiro)',
-            'fr': 'Français (French)',
-            'ru': 'Русский (Russian)'
-        }
-        language_name = language_names.get(request.language, 'English')
-        
-        file_list = '\n'.join([f"- {fc['path']}" for fc in file_contents]) if file_contents else "(Retrieved via RAG)"
-        
-        # Create detailed prompt
-        prompt = f"""You are an expert technical writer and software architect.
-Your task is to generate a comprehensive and accurate technical wiki page in Markdown format.
-
-TOPIC: {request.page_title}
-DESCRIPTION: {request.page_description}
-
-=== RAG-RETRIEVED CONTEXT (Primary Source) ===
-
-The following information was retrieved using semantic search and hybrid ranking (BM25+RRF) from the codebase:
-
-{rag_context}
-
-=== RETRIEVED SOURCE CODE SNIPPETS ===
-
-{retrieved_sources}
-
-=== ADDITIONAL EXPLICIT FILES ===
-{file_list}
-
-CRITICAL STARTING INSTRUCTION:
-The very first thing on the page MUST be a <details> block listing the relevant source files.
-Format it exactly like this:
-<details>
-<summary>Relevant source files</summary>
-
-The following files were used as context (retrieved via RAG and hybrid ranking):
-
-{chr(10).join([f"- {doc.meta_data.get('file_path', 'unknown')}" for doc in unique_docs[:10] if hasattr(doc, 'meta_data')])}
-</details>
-
-Immediately after the <details> block, the main title should be: # {request.page_title}
-
-Based on the RAG-retrieved context and source code snippets above:
-
-1. **Introduction:** Start with 1-2 paragraphs explaining the purpose and overview.
-
-2. **Detailed Sections:** Break down into logical sections using ## and ### headings:
-   - Explain architecture, components, data flow, logic
-   - Identify key functions, classes, APIs, configurations
-
-3. **Mermaid Diagrams:**
-   - EXTENSIVELY use Mermaid diagrams (flowchart TD, sequenceDiagram, classDiagram, etc.)
-   - All diagrams MUST use vertical orientation (graph TD, not LR)
-   - For sequence diagrams:
-     * Define participants at beginning
-     * Use ->> for solid arrow (requests/calls)
-     * Use -->> for dotted arrow (responses/returns)
-     * Use activation boxes with +/- suffix
-     * Use structural elements: loop, alt/else, opt, par, critical, break
-   - Provide brief explanation before/after each diagram
-
-4. **Tables:**
-   - Summarize features, components, API parameters, config options, data models
-
-5. **Code Snippets (optional):**
-   - Include short relevant snippets from source files
-   - Well-formatted with language identifiers
-
-6. **Source Citations (CRITICAL):**
-   - For EVERY significant piece of information, cite the source file
-   - Format: Sources: [filename.ext:start_line-end_line]() or [filename.ext:line_number]()
-6. **Source Citations (CRITICAL):**
-   - For EVERY significant piece of information, cite the source file from RAG results
-   - Format: Sources: [filename.ext]() (line numbers may not be available from RAG)
-   - Reference the retrieved sources provided above
-   - Multiple files: Sources: [file1.ext](), [file2.ext]()
-
-7. **Technical Accuracy:** All information must be from RAG-retrieved context and source code snippets only.
-
-8. **Clarity:** Use clear, professional, concise technical language.
-
-9. **Conclusion:** End with brief summary if appropriate.
-
-IMPORTANT: Generate the content in {language_name} language.
-"""
-        
-        # Add any explicit file contents if provided
-        if file_contents:
-            prompt += "\n\n=== EXPLICIT FILE CONTENTS ===\n"
-            for fc in file_contents:
-                prompt += f"\n{'='*60}\n"
-                prompt += f"File: {fc['path']}\n"
-                prompt += f"{'='*60}\n"
-                prompt += fc['content']
-                prompt += f"\n{'='*60}\n\n"
-        
-        prompt += """\n\nNow generate the comprehensive wiki page in markdown format.
-
-REMEMBER: Base your content primarily on the RAG-retrieved context and source code snippets provided above. 
-These have been intelligently retrieved using semantic search and hybrid ranking (BM25+RRF) to find the most relevant information.
-The RAG system has already analyzed the query and found the best matching code sections.
-
-Generate the wiki page now:"""
-        
-        # Use LLM to generate page
-        from adalflow.components.model_client.ollama_client import OllamaClient
-        from adalflow.core.types import ModelType
-        
-        model = OllamaClient()
-        model_kwargs = {
-            "model": Const.GENERATION_MODEL,
-            "options": {
-                "temperature": 0.7,
-                "num_ctx": 16384  # Larger context for comprehensive content
-            }
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
+        result = wiki_gen.generate_page(
+            page_title=request.page_title,
+            page_description=request.page_description,
+            relevant_files=request.relevant_files,
+            language=request.language,
+            page_id=page_id,
+            use_cache=True
         )
         
-        logger.info(f"Calling LLM to generate wiki page for: {request.page_title}")
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract content from Ollama ChatResponse
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            page_content = response.message.content
-        elif hasattr(response, 'data'):
-            page_content = response.data
-        elif isinstance(response, dict):
-            page_content = response.get('message', {}).get('content', '')
-        else:
-            logger.warning(f"Unexpected response type: {type(response)}")
-            page_content = str(response)
-        
-        logger.info(f"Wiki page generated ({len(page_content)} chars)")
-        
-        return {
-            "status": "success",
-            "page_title": request.page_title,
-            "language": request.language,
-            "rag_queries_performed": len(rag_queries),
-            "rag_results_count": len(rag_results),
-            "unique_sources_retrieved": len(unique_docs),
-            "explicit_files_loaded": len(file_contents),
-            "content": page_content
-        }
+        return result
         
     except HTTPException:
         raise
