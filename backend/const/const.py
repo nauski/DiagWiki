@@ -19,3 +19,4 @@ class Const:
     }
 
     GENERATION_MODEL = "qwen3-coder:30b"
+    EMBEDDING_MODEL = "nomic-embed-text"

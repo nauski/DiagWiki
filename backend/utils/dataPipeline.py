@@ -167,13 +167,32 @@ class OllamaDocumentProcessor(DataComponent):
 
 class DataPipeline:
     
-    def __init__(self):
-        embedder_kwargs = {
-            "model_client": Const.EMBEDDING_CONFIG.get("client", adal.OllamaClient()),
-            "model_kwargs": Const.EMBEDDING_CONFIG['model_kwargs']
-        }
+    def __init__(self, db_name: str = None, embedder_model: str = None, text_splitter_config: dict = None):
+        """Initialize DataPipeline with optional custom configuration.
+        
+        Args:
+            db_name: Optional database name (for process_folder)
+            embedder_model: Optional embedder model override
+            text_splitter_config: Optional text splitter config override
+        """
+        self.db_name = db_name
+        
+        # Use provided config or fall back to defaults
+        if embedder_model:
+            embedder_kwargs = {
+                "model_client": adal.OllamaClient(),
+                "model_kwargs": {"model": embedder_model}
+            }
+        else:
+            embedder_kwargs = {
+                "model_client": Const.EMBEDDING_CONFIG.get("client", adal.OllamaClient()),
+                "model_kwargs": Const.EMBEDDING_CONFIG['model_kwargs']
+            }
+        
         self.embedder = adal.Embedder(**embedder_kwargs)
-        self.splitter = TextSplitter(**Const.TEXT_SPLIT_CONFIG)
+        
+        split_config = text_splitter_config if text_splitter_config else Const.TEXT_SPLIT_CONFIG
+        self.splitter = TextSplitter(**split_config)
         
         self.embedder_transformer = OllamaDocumentProcessor(embedder=self.embedder)
         
@@ -181,6 +200,86 @@ class DataPipeline:
             self.splitter,
             self.embedder_transformer
         )
+    
+    def process_folder(self, folder_path: str, allowed_extensions: list = None, data_dir: str = None):
+        """Process all documents in a folder: collect, transform, and save to database.
+        
+        This is the main entry point that combines:
+        1. Document collection from folder
+        2. Text splitting and embedding
+        3. Saving to LocalDB
+        
+        Args:
+            folder_path: Path to folder containing documents
+            allowed_extensions: Optional list of file extensions to filter (e.g., ['.py', '.md'])
+            data_dir: Optional base directory for databases (defaults to ./data)
+        
+        Returns:
+            dict: Statistics about the transformation process
+        """
+        from utils.repoUtil import RepoUtil
+        
+        logger.info(f"Processing folder: {folder_path}")
+        
+        # Validate folder
+        if not os.path.exists(folder_path):
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+        
+        if not os.path.isdir(folder_path):
+            raise ValueError(f"Path is not a directory: {folder_path}")
+        
+        # Collect documents
+        logger.info("Collecting documents from folder...")
+        documents = RepoUtil.collect_documents(folder_path, allowed_extensions)
+        
+        if not documents:
+            raise ValueError("No documents found in folder")
+        
+        logger.info(f"Collected {len(documents)} documents")
+        
+        # Determine database directory
+        if data_dir is None:
+            data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        
+        db_dir = os.path.join(data_dir, self.db_name)
+        
+        # Transform and save
+        logger.info(f"Transforming documents (split + embed)...")
+        db = self.transform_and_save(documents, db_dir)
+        logger.info("Transformation completed")
+        
+        # Get statistics
+        transformed_docs = db.get_transformed_data(key="split_and_embed")
+        logger.info(f"Created {len(transformed_docs)} document chunks")
+        
+        # Calculate statistics
+        stats = {
+            "status": "success",
+            "folder_path": folder_path,
+            "database_name": self.db_name,
+            "database_path": os.path.join(db_dir, "db.pkl"),
+            "original_document_count": len(documents),
+            "transformed_chunk_count": len(transformed_docs),
+            "chunks_with_embeddings": 0,
+            "embedding_sizes": {},
+            "file_types": {}
+        }
+        
+        # Analyze chunks
+        for doc in transformed_docs:
+            if hasattr(doc, 'vector') and doc.vector is not None:
+                stats["chunks_with_embeddings"] += 1
+                embedding_size = len(doc.vector)
+                stats["embedding_sizes"][embedding_size] = \
+                    stats["embedding_sizes"].get(embedding_size, 0) + 1
+            
+            # Count file types
+            if hasattr(doc, 'meta_data') and 'extension' in doc.meta_data:
+                ext = doc.meta_data['extension']
+                stats["file_types"][ext] = stats["file_types"].get(ext, 0) + 1
+        
+        logger.info(f"Process completed: {stats['chunks_with_embeddings']}/{stats['transformed_chunk_count']} chunks with embeddings")
+        return stats
     
     def transform_and_save(self, documents: Sequence[Document], persist_dir: str) -> LocalDB:
         """Transform documents and save to the specified directory"""

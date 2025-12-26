@@ -11,7 +11,7 @@ class Config:
     PORT: int = int(os.environ.get("PORT", 8001))
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
     OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "Qwen3-Coder-30B-A3B-Instruct")
+    EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "qwen3-coder:30b")
     
     @classmethod
     def is_development(cls) -> bool:
