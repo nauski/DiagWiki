@@ -521,21 +521,30 @@ def build_single_diagram_prompt(
     # Diagram-specific instructions
     diagram_instructions = {
         "flowchart": """
-- Use vertical orientation (graph TD or graph TB)
+- MUST start with: flowchart TD (top-down) or flowchart LR (left-right)
 - Start with entry points, show decision nodes, end with outcomes
 - Use rectangles for processes, diamonds for decisions, rounded for start/end
 - Keep node labels concise (3-5 words max)
 - Show the logical flow from top to bottom""",
         
         "sequence": """
-- Define all participants clearly at the beginning
+- MUST start with: sequenceDiagram
+- Define participants: participant Name as Display Label (or just use participant Name)
+- CRITICAL: Do NOT use Name[Label] syntax - that's for flowcharts only!
 - Use ->> for synchronous calls (solid arrows)
 - Use -->> for responses/returns (dashed arrows)
 - Add activation boxes with +/- where appropriate
 - Show the temporal sequence of interactions
-- Include alt/else for conditional flows, loop for iterations""",
+- Include alt/else for conditional flows, loop for iterations
+- Example:
+  sequenceDiagram
+      participant Client
+      participant API as API Gateway
+      Client->>API: Request
+      API-->>Client: Response""",
         
         "class": """
+- MUST start with: classDiagram
 - Show main classes and their relationships
 - Include key methods and properties
 - Use inheritance (--|>) and composition (--o) correctly
@@ -543,13 +552,15 @@ def build_single_diagram_prompt(
 - Show interfaces and abstract classes clearly""",
         
         "graph": """
-- Use TD (top-down) orientation for hierarchies
-- Use LR (left-right) for linear flows only if needed
+- MUST start with: graph TD (top-down) or graph LR (left-right)
+- Use TD orientation for hierarchies
+- Use LR for linear flows only if needed
 - Show clear relationships between nodes
 - Use different node shapes to indicate different types
 - Keep the layout clean and readable""",
         
         "stateDiagram": """
+- MUST start with: stateDiagram-v2
 - Show all important states
 - Clearly mark initial state with [*]
 - Show transitions with labeled arrows
@@ -557,6 +568,7 @@ def build_single_diagram_prompt(
 - Mark final states""",
         
         "erDiagram": """
+- MUST start with: erDiagram
 - Show entities as tables
 - Include key attributes for each entity
 - Show relationships clearly (||--o{, etc.)
@@ -564,7 +576,18 @@ def build_single_diagram_prompt(
 - Focus on the logical data model"""
     }
     
+    # Map diagram types to their required Mermaid syntax prefixes
+    diagram_syntax = {
+        "flowchart": "flowchart TD",
+        "sequence": "sequenceDiagram",
+        "class": "classDiagram",
+        "graph": "graph TD",
+        "stateDiagram": "stateDiagram-v2",
+        "erDiagram": "erDiagram"
+    }
+    
     specific_instructions = diagram_instructions.get(diagram_type, diagram_instructions["flowchart"])
+    required_syntax = diagram_syntax.get(diagram_type, "flowchart TD")
     
     prompt = f"""You are an expert at creating clear, informative Mermaid diagrams for a DIAGRAM-FIRST WIKI.
 
@@ -587,19 +610,27 @@ SOURCE CODE SNIPPETS:
 Your task is to create a COMPREHENSIVE Mermaid {diagram_type} diagram that FULLY EXPLAINS this section.
 This is not just a visual aid - it's the main content!
 
+DIAGRAM SYNTAX REQUIREMENT:
+⚠️ CRITICAL: Your mermaid_code MUST start with: {required_syntax}
+   (NOT "graph TD" if diagram_type is "{diagram_type}")
+
 DIAGRAM REQUIREMENTS:
 {specific_instructions}
 
 CRITICAL RULES:
 1. Node IDs must be simple alphanumeric (e.g., API, Client, UserService, validateInput)
-2. Node labels should be clear and concise (use [Label] syntax)
-3. IMPORTANT: Use descriptive, meaningful node IDs that reflect their purpose
+2. SYNTAX VARIES BY DIAGRAM TYPE:
+   - Flowcharts/Graphs: Use Node[Label] or Node["Label"] syntax
+   - Sequence diagrams: Use "participant Name as Label" (NOT Name[Label])
+   - Class diagrams: Use "class Name" with methods/properties
+   - State diagrams: Use state names directly
+3. IMPORTANT: Use descriptive, meaningful node/participant IDs that reflect their purpose
    - Good: API, Client, Database, UserService, validateInput, processRequest
    - Bad: A, B, C, Node1, Node2, temp, xyz
 4. Make the diagram COMPREHENSIVE - it must fully explain {section_title}
-5. Include 8-20 nodes (be thorough, this is the main content)
+5. Include 8-20 nodes/participants (be thorough, this is the main content)
 6. Add meaningful edge labels where it adds clarity
-7. Ensure the diagram is syntactically correct Mermaid code
+7. Ensure the diagram is syntactically correct Mermaid code for {diagram_type}
 8. Since this is the primary content, be detailed and complete
 
 IMPORTANT DIAGRAM QUALITY (CRITICAL FOR DIAGRAM-FIRST WIKI):
@@ -613,7 +644,7 @@ IMPORTANT DIAGRAM QUALITY (CRITICAL FOR DIAGRAM-FIRST WIKI):
 Return your response in the following JSON format:
 
 {{
-  "mermaid_code": "graph TD\\n  Client[Client Request]\\n  API[API Layer]\\n  ...",
+  "mermaid_code": "{required_syntax}\\n  Client[Client Request]\\n  API[API Layer]\\n  ...",
   "diagram_description": "Brief 2-3 sentence explanation of what this diagram shows",
   "node_explanations": {{
     "Client": "Explanation of what this node represents and its role",
