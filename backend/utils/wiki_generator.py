@@ -1,230 +1,38 @@
 """
 Wiki generation utilities.
 
-This module handles the core logic for generating wiki structures and pages
-using RAG (Retrieval-Augmented Generation) with hybrid retrieval.
+This module orchestrates wiki generation using specialized modules:
+- WikiCache: File system caching
+- WikiRAGQuery: Dual-RAG queries
+- WikiDiagramGenerator: Diagram generation
 """
 
 import os
 import json
 import logging
 from typing import Optional, Dict, List
-from datetime import datetime
 
 from utils.rag import RAG
 from utils.repoUtil import RepoUtil
 from utils.dataPipeline import DataPipeline, generate_db_name
+from utils.wiki_cache import WikiCache
+from utils.wiki_rag import WikiRAGQuery
+from utils.wiki_diagram import WikiDiagramGenerator
 from const.const import Const
 from const.prompts import (
     build_wiki_structure_prompt,
     build_wiki_page_prompt,
     STRUCTURE_ANALYSIS_QUERIES,
-    build_page_analysis_queries,
-    build_diagram_sections_prompt,
-    build_single_diagram_prompt,
-    build_wiki_question_prompt,
-    DIAGRAM_SECTIONS_SCHEMA,
-    SINGLE_DIAGRAM_SCHEMA
+    build_page_analysis_queries
 )
-from utils.mermaid_parser import parse_mermaid_diagram, validate_mermaid_syntax
 from adalflow.components.model_client.ollama_client import OllamaClient
 from adalflow.core.types import ModelType
 
 logger = logging.getLogger(__name__)
 
 
-class WikiCache:
-    """Handles caching of generated wiki content."""
-    
-    def __init__(self, db_path: str):
-        """
-        Initialize wiki cache.
-        
-        Args:
-            db_path: Path to the database directory
-        """
-        self.db_path = db_path
-        self.wiki_dir = os.path.join(db_path, "wiki")
-        self.structure_file = os.path.join(self.wiki_dir, "structure.xml")
-        self.pages_dir = os.path.join(self.wiki_dir, "pages")
-        self.diagrams_dir = os.path.join(self.wiki_dir, "diagrams")
-        self.metadata_file = os.path.join(self.wiki_dir, "metadata.json")
-        self.wiki_db_path = os.path.join(db_path, "wiki_db.pkl")  # Separate DB for wiki content
-        
-        # Create directories if they don't exist
-        os.makedirs(self.pages_dir, exist_ok=True)
-        os.makedirs(self.diagrams_dir, exist_ok=True)
-    
-    def save_structure(self, structure: str) -> str:
-        """Save wiki structure to cache."""
-        with open(self.structure_file, 'w', encoding='utf-8') as f:
-            f.write(structure)
-        logger.info(f"Saved wiki structure to: {self.structure_file}")
-        return self.structure_file
-    
-    def load_structure(self) -> Optional[str]:
-        """Load wiki structure from cache."""
-        if os.path.exists(self.structure_file):
-            with open(self.structure_file, 'r', encoding='utf-8') as f:
-                return f.read()
-        return None
-    
-    def save_page(self, page_id: str, page_title: str, content: str, metadata: dict = None) -> str:
-        """
-        Save wiki page to cache.
-        
-        Args:
-            page_id: Unique identifier for the page
-            page_title: Title of the page
-            content: Markdown content
-            metadata: Optional metadata dict
-        
-        Returns:
-            Path to saved file
-        """
-        # Sanitize filename
-        safe_filename = page_id.replace('/', '_').replace('\\', '_')
-        page_file = os.path.join(self.pages_dir, f"{safe_filename}.md")
-        
-        with open(page_file, 'w', encoding='utf-8') as f:
-            f.write(content)
-        
-        # Save metadata
-        if metadata:
-            self._update_metadata(page_id, {
-                'title': page_title,
-                'file': page_file,
-                'generated_at': datetime.now().isoformat(),
-                **metadata
-            })
-        
-        logger.info(f"Saved wiki page to: {page_file}")
-        return page_file
-    
-    def load_page(self, page_id: str) -> Optional[str]:
-        """Load wiki page from cache."""
-        safe_filename = page_id.replace('/', '_').replace('\\', '_')
-        page_file = os.path.join(self.pages_dir, f"{safe_filename}.md")
-        
-        if os.path.exists(page_file):
-            with open(page_file, 'r', encoding='utf-8') as f:
-                return f.read()
-        return None
-    
-    def _update_metadata(self, page_id: str, page_metadata: dict):
-        """Update metadata file with page information."""
-        metadata = {}
-        if os.path.exists(self.metadata_file):
-            with open(self.metadata_file, 'r', encoding='utf-8') as f:
-                metadata = json.load(f)
-        
-        if 'pages' not in metadata:
-            metadata['pages'] = {}
-        
-        metadata['pages'][page_id] = page_metadata
-        
-        with open(self.metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2)
-    
-    def get_metadata(self) -> dict:
-        """Get all cached metadata."""
-        if os.path.exists(self.metadata_file):
-            with open(self.metadata_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
-    
-    def get_page_metadata(self, page_id: str) -> Optional[Dict]:
-        """
-        Get metadata for a specific page.
-        
-        Args:
-            page_id: Page identifier
-        
-        Returns:
-            Page metadata dict or None if not found
-        """
-        all_metadata = self._load_metadata()
-        return all_metadata.get(page_id, None)
-    
-    def add_wiki_content_to_rag(self, content_type: str, content_id: str, content_data: Dict) -> None:
-        """
-        Add generated wiki content to the wiki RAG database.
-        
-        This creates searchable documents from diagram explanations, section descriptions,
-        and other wiki content for the /askWiki endpoint.
-        
-        Args:
-            content_type: Type of content ('diagram', 'section', 'page')
-            content_id: Unique identifier for this content
-            content_data: The content data (diagram with explanations, etc.)
-        """
-        from adalflow.core.types import Document
-        from adalflow.core.db import LocalDB
-        
-        # Build text representation of the content for RAG
-        text_parts = []
-        metadata = {
-            "content_type": content_type,
-            "content_id": content_id,
-            "source": "wiki"
-        }
-        
-        if content_type == "diagram":
-            # Extract meaningful text from diagram
-            text_parts.append(f"Section: {content_data.get('section_title', '')}")
-            text_parts.append(f"Description: {content_data.get('section_description', '')}")
-            
-            # Add diagram description
-            if 'diagram' in content_data:
-                text_parts.append(f"Diagram: {content_data['diagram'].get('description', '')}")
-            
-            # Add node explanations
-            if 'nodes' in content_data:
-                text_parts.append("\nComponents:")
-                for node_id, node_data in content_data['nodes'].items():
-                    text_parts.append(f"- {node_data.get('label', node_id)}: {node_data.get('explanation', '')}")
-            
-            # Add edge explanations
-            if 'edges' in content_data:
-                text_parts.append("\nRelationships:")
-                for edge_key, edge_data in content_data['edges'].items():
-                    text_parts.append(f"- {edge_key}: {edge_data.get('explanation', '')}")
-            
-            metadata["section_id"] = content_data.get('section_id', '')
-            metadata["diagram_type"] = content_data.get('diagram', {}).get('diagram_type', '')
-        
-        # Create document
-        text = "\n".join(text_parts)
-        doc = Document(text=text, meta_data=metadata, id=content_id)
-        
-        # Load or create wiki database
-        if os.path.exists(self.wiki_db_path):
-            wiki_db = LocalDB.load_state(filepath=self.wiki_db_path)
-        else:
-            wiki_db = LocalDB()
-        
-        # Get existing documents or create new list
-        try:
-            existing_docs = wiki_db.get_transformed_data(key="wiki_content")
-        except (ValueError, KeyError):
-            existing_docs = []
-        
-        if existing_docs is None:
-            existing_docs = []
-        
-        # Check if content already exists (by ID), replace if so
-        existing_docs = [d for d in existing_docs if d.id != content_id]
-        existing_docs.append(doc)
-        
-        # Store updated documents - directly set transformed_items since these are pre-transformed
-        wiki_db.transformed_items["wiki_content"] = existing_docs
-        wiki_db.save_state(filepath=self.wiki_db_path)
-        
-        logger.info(f"Added {content_type} content to wiki RAG: {content_id}")
-
-
 class WikiGenerator:
-    """Main class for wiki generation using RAG."""
+    """Main orchestrator for wiki generation using RAG."""
     
     def __init__(self, root_path: str, data_dir: str):
         """
@@ -240,6 +48,8 @@ class WikiGenerator:
         self.db_path = os.path.join(data_dir, self.db_name)
         self.cache = WikiCache(self.db_path)
         self.rag = None
+        self.wiki_rag_query = None
+        self.diagram_generator = None
     
     def ensure_database(self):
         """Ensure database exists, create if needed."""
@@ -257,166 +67,23 @@ class WikiGenerator:
             logger.info(f"Database created: {result}")
     
     def initialize_rag(self):
-        """Initialize RAG system."""
+        """Initialize RAG system and specialized modules."""
         if self.rag is None:
             self.rag = RAG()
             self.rag.load_database(self.db_path)
             logger.info(f"RAG initialized with {len(self.rag.transformed_docs)} documents")
+            
+            # Initialize specialized modules
+            self.wiki_rag_query = WikiRAGQuery(self.cache.wiki_db_path, self.rag)
+            self.diagram_generator = WikiDiagramGenerator(self.root_path, self.cache, self.rag)
     
     def query_wiki_rag(self, query: str, top_k: int = 5) -> Dict:
         """
         Query both wiki and codebase RAG for comprehensive answers.
-        
-        This queries BOTH:
-        1. Wiki database (generated diagrams and explanations)
-        2. Codebase database (actual source code)
-        
-        Combining both sources prevents information loss and provides complete answers.
-        
-        Args:
-            query: User's question about the wiki
-            top_k: Number of results to retrieve from each source
-        
-        Returns:
-            Dict with answer combining both wiki and codebase context
+        Delegates to WikiRAGQuery module.
         """
-        from adalflow.core.db import LocalDB
-        
-        # Check if wiki database exists
-        wiki_db_path = self.cache.wiki_db_path
-        if not os.path.exists(wiki_db_path):
-            return {
-                "status": "error",
-                "error": "No wiki content has been generated yet. Generate diagrams first using /identifyDiagramSections and /generateSectionDiagram.",
-                "wiki_db_path": wiki_db_path
-            }
-        
-        # Load wiki database
-        wiki_db = LocalDB.load_state(filepath=wiki_db_path)
-        
-        try:
-            wiki_docs = wiki_db.get_transformed_data(key="wiki_content")
-        except (ValueError, KeyError):
-            wiki_docs = []
-        
-        if wiki_docs is None:
-            wiki_docs = []
-        
-        if not wiki_docs:
-            return {
-                "status": "error",
-                "error": "Wiki database is empty. Generate some diagrams first.",
-                "wiki_db_path": wiki_db_path
-            }
-        
-        logger.info(f"Querying wiki RAG with {len(wiki_docs)} wiki documents")
-        
-        # 1. Retrieve from wiki database (simple keyword matching)
-        query_lower = query.lower()
-        scored_wiki_docs = []
-        
-        for doc in wiki_docs:
-            score = 0
-            doc_text_lower = doc.text.lower()
-            
-            # Simple keyword scoring
-            for word in query_lower.split():
-                if len(word) > 3:  # Skip short words
-                    score += doc_text_lower.count(word)
-            
-            if score > 0:
-                scored_wiki_docs.append((score, doc))
-        
-        # Sort by score and get top_k
-        scored_wiki_docs.sort(reverse=True, key=lambda x: x[0])
-        wiki_retrieved_docs = [doc for score, doc in scored_wiki_docs[:top_k]]
-        
-        # Build wiki context
-        wiki_context = "\n\n".join([
-            f"[{doc.meta_data.get('content_type', 'unknown')} - {doc.meta_data.get('content_id', 'unknown')}]\n{doc.text}"
-            for doc in wiki_retrieved_docs
-        ]) if wiki_retrieved_docs else "No relevant wiki content found."
-        
-        # 2. Retrieve from codebase RAG using the full RAG system
         self.initialize_rag()
-        
-        try:
-            # RAG.call() returns (RAGAnswer, List[Document])
-            rag_answer, codebase_docs = self.rag.call(
-                query=query,
-                top_k=top_k,
-                use_reranking=True
-            )
-            
-            # Build codebase context
-            codebase_context = "\n\n".join([
-                f"[{doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}]\n{doc.text[:500]}"
-                for doc in codebase_docs[:top_k]
-            ]) if codebase_docs else "No relevant codebase snippets found."
-            
-        except Exception as e:
-            logger.warning(f"Failed to query codebase RAG: {e}")
-            codebase_context = "Codebase context unavailable."
-            codebase_docs = []
-        
-        # 3. Generate answer using BOTH contexts
-        prompt = build_wiki_question_prompt(
-            question=query,
-            wiki_context=wiki_context,
-            codebase_context=codebase_context
-        )
-        
-        model = OllamaClient()
-        model_kwargs = {
-            "model": Const.GENERATION_MODEL,
-            "options": {"temperature": 0.7}
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            answer = response.message.content
-        else:
-            answer = str(response)
-        
-        # Format sources from both wiki and codebase
-        sources = {
-            "wiki": [],
-            "codebase": []
-        }
-        
-        for i, doc in enumerate(wiki_retrieved_docs, 1):
-            sources["wiki"].append({
-                "rank": i,
-                "content_type": doc.meta_data.get('content_type', 'unknown'),
-                "content_id": doc.meta_data.get('content_id', 'unknown'),
-                "section_id": doc.meta_data.get('section_id', ''),
-                "text_preview": doc.text[:200] + "..." if len(doc.text) > 200 else doc.text
-            })
-        
-        for i, doc in enumerate(codebase_docs[:top_k], 1):
-            file_path = doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'
-            sources["codebase"].append({
-                "rank": i,
-                "file_path": file_path,
-                "text_preview": doc.text[:200] + "..." if len(doc.text) > 200 else doc.text
-            })
-        
-        return {
-            "status": "success",
-            "query": query,
-            "answer": answer,
-            "sources": sources,
-            "wiki_doc_count": len(wiki_docs),
-            "wiki_retrieved": len(wiki_retrieved_docs),
-            "codebase_retrieved": len(codebase_docs[:top_k])
-        }
+        return self.wiki_rag_query.query_wiki_rag(query, top_k)
     
     def generate_structure(self, language: str = "en", comprehensive: bool = False, use_cache: bool = True) -> Dict:
         """
@@ -723,128 +390,11 @@ class WikiGenerator:
         use_cache: bool = True
     ) -> Dict:
         """
-        Step 1: Identify diagram sections for the codebase (Diagram-First Wiki).
-        
-        This is for a DIAGRAM-FIRST WIKI - diagrams ARE the content, not supplements.
-        Analyzes the codebase and identifies diagram sections that together explain it.
-        The number of sections is determined by the LLM based on codebase complexity.
-        
-        The system automatically determines what aspects of the codebase should be visualized
-        based on RAG analysis of the code structure, functionality, and architecture.
-        
-        Args:
-            language: Target language code
-            use_cache: Whether to use cached sections if available
-        
-        Returns:
-            Dict with status and identified sections list
+        Step 1: Identify diagram sections for the codebase.
+        Delegates to WikiDiagramGenerator module.
         """
-        # Use repo name as page_id for caching
-        repo_name = os.path.basename(self.root_path)
-        page_id = repo_name.lower().replace(' ', '_').replace('/', '_')
-        
-        # Check cache first
-        if use_cache:
-            cache_file = os.path.join(self.cache.diagrams_dir, f"{page_id}_sections.json")
-            if os.path.exists(cache_file):
-                logger.info(f"✅ Using cached diagram sections from: {cache_file}")
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                    cached_data['cached'] = True
-                    cached_data['cache_file'] = cache_file
-                    return cached_data
-        
-        # Ensure RAG is initialized
         self.initialize_rag()
-        
-        # Generate RAG queries
-        rag_queries = build_page_analysis_queries(repo_name, "Identify key components and workflows suitable for diagrammatic representation.")
-        
-        # Perform RAG queries
-        logger.info(f"Performing {len(rag_queries)} RAG queries for: {repo_name}")
-        rag_results = []
-        
-        for query in rag_queries:
-            try:
-                result = self.rag.call(
-                    query=query,
-                    top_k=8,
-                    use_reranking=True
-                )
-                rag_results.append({
-                    "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
-                })
-                logger.info(f"RAG query completed: {query[:60]}...")
-            except Exception as e:
-                logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
-        
-        # Build RAG context
-        rag_context = "\n\n".join([
-            f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
-            for r in rag_results
-        ])
-        
-        # Step 1: Identify diagram sections
-        logger.info("Identifying diagram sections...")
-        sections_prompt = build_diagram_sections_prompt(
-            repo_name=repo_name,
-            rag_context=rag_context,
-            language=language
-        )
-        
-        model = OllamaClient()
-        model_kwargs = {
-            "model": Const.GENERATION_MODEL,
-            "format": "json",
-            "options": {
-                "temperature": 0.7,
-                "num_ctx": 8192
-            }
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=sections_prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract content
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            sections_json = response.message.content
-        else:
-            sections_json = str(response)
-        
-        try:
-            sections_data = json.loads(sections_json)
-            identified_sections = sections_data.get('sections', [])
-            logger.info(f"Identified {len(identified_sections)} sections for diagrams")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse sections JSON: {e}")
-            identified_sections = []
-        
-        # Cache the result
-        cache_file = os.path.join(self.cache.diagrams_dir, f"{page_id}_sections.json")
-        
-        result = {
-            "status": "success",
-            "repo_name": repo_name,
-            "language": language,
-            "sections": identified_sections,
-            "rag_queries_performed": len(rag_queries),
-            "cached": False,
-            "cache_file": cache_file
-        }
-        
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"💾 Cached sections to: {cache_file}")
-        
-        return result
+        return self.diagram_generator.identify_diagram_sections(language, use_cache)
     
     def generate_section_diagram(
         self,
@@ -857,232 +407,17 @@ class WikiGenerator:
         use_cache: bool = True
     ) -> Dict:
         """
-        Step 2: Generate diagram for a single section (Two-Step API - Part 2).
-        
-        This is the second step of diagram-first wiki generation.
-        Generates a comprehensive Mermaid diagram with node/edge explanations for one section.
-        
-        Args:
-            section_id: ID of this section
-            section_title: Title of this section
-            section_description: Description of what this section covers
-            diagram_type: Type of Mermaid diagram (flowchart, sequence, etc.)
-            key_concepts: List of key concepts to include
-            language: Target language code
-            use_cache: Whether to use cached diagram if available
-        
-        Returns:
-            Dict with diagram, nodes with explanations, edges with explanations
+        Step 2: Generate diagram for a single section.
+        Delegates to WikiDiagramGenerator module.
         """
-        # Check cache first
-        if use_cache:
-            cache_file = os.path.join(self.cache.diagrams_dir, f"diag_{section_id}.json")
-            mermaid_file = os.path.join(self.cache.diagrams_dir, f"diag_{section_id}.mmd")
-            if os.path.exists(cache_file):
-                logger.info(f"✅ Using cached diagram from: {cache_file}")
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                    cached_data['cached'] = True
-                    cached_data['cache_file'] = cache_file
-                    cached_data['mermaid_file'] = mermaid_file if os.path.exists(mermaid_file) else None
-                    return cached_data
-        
-        # Ensure RAG is initialized
         self.initialize_rag()
-        
-        # Perform focused RAG queries for this specific section
-        section_queries = [
-            f"How does {section_title} work?",
-            f"What are the components involved in {section_title}?",
-            f"Explain the implementation of {section_title}"
-        ]
-        
-        logger.info(f"Performing RAG queries for section: {section_title}")
-        rag_results = []
-        all_retrieved_docs = []
-        
-        for query in section_queries:
-            try:
-                result = self.rag.call(
-                    query=query,
-                    top_k=8,
-                    use_reranking=True
-                )
-                rag_results.append({
-                    "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
-                })
-                all_retrieved_docs.extend(result.documents)
-                logger.info(f"RAG query completed: {query[:60]}...")
-            except Exception as e:
-                logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
-        
-        # Build RAG context
-        rag_context = "\n\n".join([
-            f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
-            for r in rag_results
-        ])
-        
-        # Deduplicate documents for retrieval
-        seen_paths = {}
-        unique_docs = []
-        for doc in all_retrieved_docs:
-            file_path = doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'
-            if file_path not in seen_paths:
-                seen_paths[file_path] = doc
-                unique_docs.append(doc)
-        
-        retrieved_sources = "\n\n".join([
-            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:800]}"
-            for i, doc in enumerate(unique_docs[:15])
-        ])
-        
-        # Build diagram prompt
-        logger.info(f"Generating diagram for: {section_title}")
-        diagram_prompt = build_single_diagram_prompt(
-            section_title=section_title,
-            section_description=section_description,
-            diagram_type=diagram_type,
-            key_concepts=key_concepts,
-            rag_context=rag_context,
-            retrieved_sources=retrieved_sources,
-            language=language
+        return self.diagram_generator.generate_section_diagram(
+            section_id, section_title, section_description,
+            diagram_type, key_concepts, language, use_cache
         )
-        
-        # Call LLM for diagram
-        model = OllamaClient()
-        model_kwargs = {
-            "model": Const.GENERATION_MODEL,
-            "format": "json",
-            "options": {
-                "temperature": 0.7,
-                "num_ctx": 16384
-            }
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=diagram_prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        diagram_response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract diagram content
-        if hasattr(diagram_response, 'message') and hasattr(diagram_response.message, 'content'):
-            diagram_json = diagram_response.message.content
-        else:
-            diagram_json = str(diagram_response)
-        
-        try:
-            diagram_data = json.loads(diagram_json)
-            mermaid_code = diagram_data.get('mermaid_code', '')
-            diagram_description = diagram_data.get('diagram_description', '')
-            node_explanations = diagram_data.get('node_explanations', {})
-            edge_explanations = diagram_data.get('edge_explanations', {})
-            
-            # Validate and parse mermaid code
-            is_valid, validation_msg = validate_mermaid_syntax(mermaid_code)
-            
-            if is_valid:
-                parsed = parse_mermaid_diagram(mermaid_code)
-                
-                # Combine LLM explanations with parsed structure
-                nodes = {}
-                for node_id in parsed['node_list']:
-                    node_data = parsed['nodes'][node_id]
-                    nodes[node_id] = {
-                        "label": node_data['label'],
-                        "shape": node_data['shape'],
-                        "explanation": node_explanations.get(node_id, "")
-                    }
-                
-                edges = {}
-                for edge in parsed['edges']:
-                    edge_key = edge['key']
-                    edges[edge_key] = {
-                        "source": edge['source'],
-                        "target": edge['target'],
-                        "label": edge['label'],
-                        "explanation": edge_explanations.get(edge_key, "")
-                    }
-                
-                # Prepare cache file paths
-                cache_file = os.path.join(self.cache.diagrams_dir, f"diag_{section_id}.json")
-                mermaid_file = os.path.join(self.cache.diagrams_dir, f"diag_{section_id}.mmd")
-                
-                result = {
-                    "status": "success",
-                    "section_id": section_id,
-                    "section_title": section_title,
-                    "section_description": section_description,
-                    "language": language,
-                    "diagram": {
-                        "mermaid_code": mermaid_code,
-                        "description": diagram_description,
-                        "is_valid": True,
-                        "diagram_type": parsed['diagram_type']
-                    },
-                    "nodes": nodes,
-                    "edges": edges,
-                    "rag_queries_performed": len(section_queries),
-                    "cached": False,
-                    "cache_file": cache_file,
-                    "mermaid_file": mermaid_file
-                }
-            else:
-                result = {
-                    "status": "error",
-                    "section_id": section_id,
-                    "section_title": section_title,
-                    "error": f"Invalid Mermaid syntax: {validation_msg}",
-                    "diagram": {
-                        "mermaid_code": mermaid_code,
-                        "description": diagram_description,
-                        "is_valid": False,
-                        "validation_error": validation_msg
-                    },
-                    "nodes": node_explanations,
-                    "edges": edge_explanations
-                }
-        
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse diagram JSON: {e}")
-            result = {
-                "status": "error",
-                "section_id": section_id,
-                "section_title": section_title,
-                "error": f"JSON parse error: {str(e)}",
-                "raw_response": diagram_json[:500]
-            }
-        
-        # Cache the result if successful
-        if result.get("status") == "success" and 'cache_file' in result:
-            # Save JSON file
-            with open(result['cache_file'], 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2, ensure_ascii=False)
-            logger.info(f"💾 Cached diagram JSON to: {result['cache_file']}")
-            
-            # Save Mermaid code separately for easy inspection
-            if 'mermaid_file' in result and result['diagram'].get('mermaid_code'):
-                with open(result['mermaid_file'], 'w', encoding='utf-8') as f:
-                    f.write(result['diagram']['mermaid_code'])
-                logger.info(f"💾 Cached Mermaid code to: {result['mermaid_file']}")
-            
-            # Add to wiki RAG database for /askWiki endpoint
-            try:
-                self.cache.add_wiki_content_to_rag(
-                    content_type="diagram",
-                    content_id=section_id,
-                    content_data=result
-                )
-                logger.info(f"📚 Added diagram to wiki RAG: {section_id}")
-            except Exception as e:
-                logger.warning(f"Failed to add diagram to wiki RAG: {e}")
-        
-        return result
     
+    # DEPRECATED: This method is kept for backward compatibility but is not used by the current API.
+    # The two-step approach (identify_diagram_sections + generate_section_diagram) is preferred.
     def generate_page_with_diagrams(
         self,
         page_title: str,
