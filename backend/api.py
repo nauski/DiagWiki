@@ -1,8 +1,9 @@
-import os, logging
+import os, logging, json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, HTTPException, Body
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from utils.repoUtil import RepoUtil
 from utils.dataPipeline import check_ollama_model_exists, get_all_ollama_models, DataPipeline, generate_db_name
 from utils.wiki_generator import WikiGenerator
@@ -32,6 +33,15 @@ app = FastAPI(
     title=APP_NAME,
     version=APP_VERSION,
     lifespan=lifespan,
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:4173"],  # Vite/SvelteKit dev servers
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -124,7 +134,7 @@ async def list_available_models():
 
 @app.post("/initWiki")
 async def init_wiki(
-    root_path: str = Query(..., description="Root path to the folder for wiki initialization")
+    root_path: str = Body(..., embed=True, description="Root path to the folder for wiki initialization")
 ):
     """
     Initialize wiki from a local folder.
@@ -681,3 +691,136 @@ async def modify_or_create_wiki(request: ModifyOrCreateWikiRequest = Body(...)):
     except Exception as e:
         logger.error(f"Error creating/modifying wiki: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create/modify wiki: {str(e)}")
+
+
+# Pydantic models for new endpoints
+class DiagramReferencesRequest(BaseModel):
+    root_path: str = Field(..., description="Root path to the project")
+    section_id: str = Field(..., description="Section ID to get references for")
+
+
+class FolderTreeRequest(BaseModel):
+    root_path: str = Field(..., description="Root path to the project folder")
+
+
+@app.post("/getDiagramReferences")
+async def get_diagram_references(request: DiagramReferencesRequest = Body(...)):
+    """
+    Get the source files (RAG references) used to generate a specific diagram.
+    
+    This endpoint retrieves the list of source files that were analyzed
+    via RAG to generate the specified diagram section.
+    
+    Args:
+        request: DiagramReferencesRequest with root_path and section_id
+        
+    Returns:
+        JSON with rag_sources array containing file paths and relevance
+    """
+    try:
+        # Validate folder
+        if not os.path.exists(request.root_path):
+            raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
+        
+        # Load diagram data from cache
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        from utils.dataPipeline import generate_db_name
+        db_name = generate_db_name(request.root_path)
+        db_path = os.path.join(data_dir, db_name)
+        diagrams_dir = os.path.join(db_path, "wiki", "diagrams")
+        
+        cache_file = os.path.join(diagrams_dir, f"diag_{request.section_id}.json")
+        
+        if not os.path.exists(cache_file):
+            raise HTTPException(status_code=404, detail=f"Diagram section not found: {request.section_id}")
+        
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            diagram_data = json.load(f)
+        
+        # Extract rag_sources
+        rag_sources = diagram_data.get('rag_sources', [])
+        
+        logger.info(f"Diagram {request.section_id} has {len(rag_sources)} RAG sources")
+        
+        return {
+            "status": "success",
+            "section_id": request.section_id,
+            "rag_sources": rag_sources,
+            "has_sources": len(rag_sources) > 0
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting diagram references: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get diagram references: {str(e)}")
+
+
+@app.post("/getFolderTree")
+async def get_folder_tree(request: FolderTreeRequest = Body(...)):
+    """
+    Get the folder structure for a project.
+    
+    This endpoint returns a hierarchical tree structure of the project's
+    folders and files.
+    
+    Args:
+        request: FolderTreeRequest with root_path
+        
+    Returns:
+        JSON with folder tree structure
+    """
+    try:
+        # Validate folder
+        if not os.path.exists(request.root_path):
+            raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
+        
+        def build_tree(path: str, max_depth: int = 5, current_depth: int = 0) -> Dict:
+            """Recursively build folder tree"""
+            name = os.path.basename(path)
+            
+            # Skip hidden files and common ignore patterns
+            if name.startswith('.') or name in ['node_modules', '__pycache__', 'dist', 'build', 'venv', '.git']:
+                return None
+            
+            if current_depth >= max_depth:
+                return None
+            
+            if os.path.isfile(path):
+                return {
+                    "name": name,
+                    "type": "file",
+                    "path": os.path.relpath(path, request.root_path)
+                }
+            elif os.path.isdir(path):
+                children = []
+                try:
+                    for item in sorted(os.listdir(path)):
+                        item_path = os.path.join(path, item)
+                        child_tree = build_tree(item_path, max_depth, current_depth + 1)
+                        if child_tree:
+                            children.append(child_tree)
+                except PermissionError:
+                    pass
+                
+                return {
+                    "name": name if name else os.path.basename(request.root_path),
+                    "type": "folder",
+                    "path": os.path.relpath(path, request.root_path) if path != request.root_path else ".",
+                    "children": children
+                }
+            return None
+        
+        tree = build_tree(request.root_path)
+        
+        return {
+            "status": "success",
+            "root_path": request.root_path,
+            "tree": tree
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting folder tree: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get folder tree: {str(e)}")

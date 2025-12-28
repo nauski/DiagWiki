@@ -139,15 +139,15 @@ class WikiGenerator:
         
         for query in STRUCTURE_ANALYSIS_QUERIES:
             try:
-                result = self.rag.call(
+                answer, retrieved_docs = self.rag.call(
                     query=query,
                     top_k=5,
                     use_reranking=True
                 )
                 rag_insights.append({
                     "query": query,
-                    "answer": result.answer,
-                    "sources": [doc.text[:300] for doc in result.documents[:3]]
+                    "answer": answer.answer,
+                    "sources": [doc.text[:300] for doc in retrieved_docs[:3]]
                 })
                 logger.info(f"RAG query completed: {query[:50]}...")
             except Exception as e:
@@ -261,17 +261,17 @@ class WikiGenerator:
         
         for query in rag_queries:
             try:
-                result = self.rag.call(
+                answer, retrieved_docs = self.rag.call(
                     query=query,
                     top_k=8,
                     use_reranking=True
                 )
                 rag_results.append({
                     "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
+                    "answer": answer.answer,
+                    "rationale": answer.rationale
                 })
-                all_retrieved_docs.extend(result.documents)
+                all_retrieved_docs.extend(retrieved_docs)
                 logger.info(f"RAG query completed: {query[:60]}...")
             except Exception as e:
                 logger.warning(f"RAG query failed for '{query[:50]}...': {e}")

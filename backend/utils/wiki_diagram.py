@@ -86,15 +86,15 @@ class WikiDiagramGenerator:
         
         for query in rag_queries:
             try:
-                result = self.rag.call(
+                answer, retrieved_docs = self.rag.call(
                     query=query,
                     top_k=8,
                     use_reranking=True
                 )
                 rag_results.append({
                     "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
+                    "answer": answer.answer,
+                    "rationale": answer.rationale
                 })
                 logger.info(f"RAG query completed: {query[:60]}...")
             except Exception as e:
@@ -210,8 +210,15 @@ class WikiDiagramGenerator:
         if self.rag is None:
             raise RuntimeError("RAG not initialized. Call initialize_rag() first.")
         
-        # Perform focused RAG queries for this specific section
-        rag_results, retrieved_sources = self._perform_section_rag_queries(section_title)
+        # For custom diagrams (long prompts as titles), generate a concise title
+        original_title = section_title
+        if section_id.startswith('custom_') and len(section_title) > 60:
+            logger.info(f"Generating concise title from prompt: {section_title[:100]}...")
+            section_title = self._generate_concise_title(section_title, section_description)
+            logger.info(f"Generated title: {section_title}")
+        
+        # Perform RAG queries
+        rag_context, retrieved_sources, all_retrieved_docs = self._perform_section_rag_queries(section_title if len(section_title) < 60 else section_description)
         
         # Build diagram prompt
         logger.info(f"Generating diagram for: {section_title}")
@@ -220,13 +227,26 @@ class WikiDiagramGenerator:
             section_description=section_description,
             diagram_type=diagram_type,
             key_concepts=key_concepts,
-            rag_context=rag_results,
+            rag_context=rag_context,
             retrieved_sources=retrieved_sources,
             language=language
         )
         
         # Call LLM for diagram
         diagram_data = self._generate_diagram_with_llm(diagram_prompt)
+        
+        # Extract unique source file paths from retrieved documents
+        source_files = []
+        seen_paths = set()
+        for doc in all_retrieved_docs:
+            if hasattr(doc, 'meta_data'):
+                file_path = doc.meta_data.get('file_path', '')
+                if file_path and file_path not in seen_paths:
+                    seen_paths.add(file_path)
+                    source_files.append({
+                        "file": file_path,
+                        "relevance": f"Used to generate {section_title}"
+                    })
         
         # Process the diagram response
         result = self._process_diagram_response(
@@ -235,7 +255,8 @@ class WikiDiagramGenerator:
             section_title,
             section_description,
             language,
-            len(rag_results.split('\n\n'))  # Approximate query count
+            len(rag_context.split('\n\n')),  # Approximate query count
+            source_files  # Pass source files
         )
         
         # Cache and add to wiki RAG if successful
@@ -243,6 +264,58 @@ class WikiDiagramGenerator:
             self._cache_diagram_result(result)
         
         return result
+    
+    def _generate_concise_title(self, prompt: str, description: str) -> str:
+        """Generate a concise title from a user prompt for custom diagrams."""
+        title_prompt = f"""Given this user request for a diagram:
+
+"{prompt}"
+
+Generate a concise, descriptive title (max 8 words) that captures the essence of what they want to visualize.
+
+Requirements:
+- Maximum 8 words
+- Clear and specific
+- Descriptive of the diagram content
+- Professional tone
+
+Return ONLY the title text, nothing else."""
+
+        model = OllamaClient()
+        model_kwargs = {
+            "model": Const.GENERATION_MODEL,
+            "options": {
+                "temperature": 0.3,
+                "num_ctx": 4096
+            }
+        }
+        
+        api_kwargs = model.convert_inputs_to_api_kwargs(
+            input=title_prompt,
+            model_kwargs=model_kwargs,
+            model_type=ModelType.LLM
+        )
+        
+        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
+        
+        # Extract title from response
+        if hasattr(response, 'message') and hasattr(response.message, 'content'):
+            title = response.message.content.strip()
+        else:
+            title = str(response).strip()
+        
+        # Clean up the title (remove quotes, extra whitespace)
+        title = title.strip('"\'').strip()
+        
+        # Fallback if title is too long or empty
+        if not title or len(title) > 100:
+            # Extract first few words from prompt
+            words = prompt.split()[:8]
+            title = ' '.join(words)
+            if len(prompt.split()) > 8:
+                title += '...'
+        
+        return title
     
     def _perform_section_rag_queries(self, section_title: str) -> tuple:
         """Perform RAG queries for a specific section."""
@@ -258,17 +331,17 @@ class WikiDiagramGenerator:
         
         for query in section_queries:
             try:
-                result = self.rag.call(
+                answer, retrieved_docs = self.rag.call(
                     query=query,
                     top_k=8,
                     use_reranking=True
                 )
                 rag_results.append({
                     "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
+                    "answer": answer.answer,
+                    "rationale": answer.rationale
                 })
-                all_retrieved_docs.extend(result.documents)
+                all_retrieved_docs.extend(retrieved_docs)
                 logger.info(f"RAG query completed: {query[:60]}...")
             except Exception as e:
                 logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
@@ -293,7 +366,7 @@ class WikiDiagramGenerator:
             for i, doc in enumerate(unique_docs[:15])
         ])
         
-        return rag_context, retrieved_sources
+        return rag_context, retrieved_sources, all_retrieved_docs
     
     def _generate_diagram_with_llm(self, diagram_prompt: str) -> str:
         """Generate diagram using LLM."""
@@ -328,9 +401,13 @@ class WikiDiagramGenerator:
         section_title: str,
         section_description: str,
         language: str,
-        rag_query_count: int
+        rag_query_count: int,
+        source_files: List[Dict] = None
     ) -> Dict:
         """Process the LLM diagram response and validate."""
+        if source_files is None:
+            source_files = []
+        
         try:
             diagram_data = json.loads(diagram_json)
             mermaid_code = diagram_data.get('mermaid_code', '')
@@ -382,6 +459,7 @@ class WikiDiagramGenerator:
                     },
                     "nodes": nodes,
                     "edges": edges,
+                    "rag_sources": source_files,
                     "rag_queries_performed": rag_query_count,
                     "cached": False,
                     "cache_file": cache_file,

@@ -125,19 +125,33 @@ class OllamaDocumentProcessor(DataComponent):
     Process documents for Ollama embeddings by processing one document at a time.
     Adalflow Ollama Client does not support batch embedding, so we need to process each document individually.
     """
+    # Maximum token count for embedding model (nomic-embed-text context is 8192)
+    MAX_EMBEDDING_TOKENS = 8000  # Leave some buffer
+    
     def __init__(self, embedder: adal.Embedder) -> None:
         super().__init__()
         self.embedder = embedder
 
     def __call__(self, documents: Sequence[Document]) -> Sequence[Document]:
+        from utils.repoUtil import RepoUtil
         output = deepcopy(documents)
         logger.info(f"Processing {len(output)} documents individually for Ollama embeddings")
 
         successful_docs = []
         expected_embedding_size = None
+        skipped_large_docs = 0
 
         for i, doc in enumerate(tqdm(output, desc="Processing documents for Ollama embeddings")):
             try:
+                # Check token count before attempting to embed
+                token_count = RepoUtil.token_count(doc.text)
+                file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
+                
+                if token_count > self.MAX_EMBEDDING_TOKENS:
+                    logger.warning(f"Document '{file_path}' has {token_count} tokens which exceeds embedding model context limit ({self.MAX_EMBEDDING_TOKENS}), skipping")
+                    skipped_large_docs += 1
+                    continue
+                
                 # Get embedding for a single document
                 result = self.embedder(input=doc.text)
                 if result.data and len(result.data) > 0:
@@ -162,6 +176,8 @@ class OllamaDocumentProcessor(DataComponent):
                 file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
                 logger.error(f"Error processing document '{file_path}': {e}, skipping")
 
+        if skipped_large_docs > 0:
+            logger.info(f"Skipped {skipped_large_docs} documents that exceeded token limit ({self.MAX_EMBEDDING_TOKENS} tokens)")
         logger.info(f"Successfully processed {len(successful_docs)}/{len(output)} documents with consistent embeddings")
         return successful_docs
 

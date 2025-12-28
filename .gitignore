@@ -1,3 +1,4 @@
+# backend ignores
 backend/.env
 backend/logs
 backend/data
@@ -5,3 +6,8 @@ backend/data
 **/__pycache__/
 # all .pyc files
 **/*.pyc
+
+# frontend ignores
+frontend/node_modules
+frontend/build
+frontend/.svelte-kit

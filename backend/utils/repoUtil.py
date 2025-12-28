@@ -56,6 +56,11 @@ class RepoUtil:
             file_name: Name of the file to check
             allowed_extensions: List of allowed extensions, or None for default (CODE + DOC)
         """
+        # Skip known large files that shouldn't be embedded
+        large_file_patterns = ['package-lock.json', 'yarn.lock', 'poetry.lock', 'Cargo.lock', 'package.json.lock']
+        if file_name in large_file_patterns:
+            return False
+        
         _, ext = os.path.splitext(file_name)
         if allowed_extensions is None:
             return ext in Const.CODE_EXTENSIONS or ext in Const.DOC_EXTENSIONS
