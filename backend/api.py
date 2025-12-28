@@ -224,34 +224,50 @@ async def query_wiki(
     root_path: str = Query(..., description="Root path to the wiki folder"),
     query: str = Query(..., description="Question to ask about the codebase"),
     top_k: int = Query(5, description="Number of documents to retrieve"),
-    use_reranking: bool = Query(True, description="Whether to use hybrid retrieval (semantic + BM25)")
+    use_reranking: bool = Query(True, description="Whether to use hybrid retrieval (semantic + BM25)"),
+    include_wiki: bool = Query(False, description="Whether to include generated wiki content in the search")
 ):
     """
-    Query the wiki using RAG.
+    Query the codebase using RAG, optionally including generated wiki content.
     
     This endpoint:
     1. Loads the RAG system for the specified folder
-    2. Retrieves relevant document chunks
-    3. Generates an answer using the LLM
-    4. Returns the answer with source documents
+    2. Retrieves relevant document chunks from codebase
+    3. Optionally retrieves from generated wiki database (if include_wiki=True)
+    4. Generates an answer using the LLM with combined context
+    5. Returns the answer with source documents from both sources
     
     Args:
         root_path: Absolute path to the wiki folder
         query: User's question
-        top_k: Number of documents to retrieve (default: 5)
+        top_k: Number of documents to retrieve from each source (default: 5)
         use_reranking: Enable hybrid retrieval for better results (default: True)
+        include_wiki: Include generated wiki content in search (default: False)
         
     Returns:
         Generated answer with rationale and source documents
     """
     try:
         logger.info(f"Processing query for folder: {root_path}")
-        logger.info(f"Query: {query}")
+        logger.info(f"Query: {query}, include_wiki: {include_wiki}")
         
         # Validate folder exists
         if not os.path.exists(root_path):
             raise HTTPException(status_code=404, detail=f"Folder not found: {root_path}")
         
+        # If include_wiki is requested, use WikiGenerator's dual-RAG query
+        if include_wiki:
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            wiki_gen = WikiGenerator(root_path=root_path, data_dir=data_dir)
+            
+            result = wiki_gen.query_wiki_rag(query=query, top_k=top_k)
+            
+            if result.get("status") == "error":
+                raise HTTPException(status_code=400, detail=result.get("error"))
+            
+            return result
+        
+        # Otherwise, use standard codebase-only RAG
         # Generate database name and check if it exists
         db_name = generate_db_name(root_path)
         data_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -545,61 +561,3 @@ async def generate_section_diagram(request: SectionDiagramRequest = Body(...)):
     except Exception as e:
         logger.error(f"Error generating section diagram: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate section diagram: {str(e)}")
-
-
-@app.get("/askWiki")
-async def ask_wiki(
-    root_path: str = Query(..., description="Root path to the folder"),
-    question: str = Query(..., description="Question to ask about the generated wiki"),
-    top_k: int = Query(5, description="Number of wiki documents to retrieve")
-):
-    """
-    Ask questions about the generated wiki content.
-    
-    This endpoint queries a separate RAG database that contains ONLY the generated wiki content
-    (diagram explanations, section descriptions, node/edge explanations, etc.).
-    
-    Use this endpoint to:
-    - Ask follow-up questions about diagrams
-    - Clarify relationships shown in diagrams
-    - Get explanations of specific components
-    - Understand the connections between different sections
-    
-    This is separate from /query which searches the original codebase.
-    
-    Prerequisites:
-    - Must have generated some diagrams first using /generateSectionDiagram
-    - Each generated diagram is automatically added to the wiki RAG database
-    
-    Args:
-        root_path: Absolute path to the folder
-        question: User's question about the wiki
-        top_k: Number of wiki documents to retrieve (default: 5)
-        
-    Returns:
-        Answer based on generated wiki content with source documents
-    """
-    try:
-        logger.info(f"Processing wiki question for folder: {root_path}")
-        logger.info(f"Question: {question}")
-        
-        # Validate folder
-        if not os.path.exists(root_path):
-            raise HTTPException(status_code=404, detail=f"Folder not found: {root_path}")
-        
-        # Use WikiGenerator to query wiki RAG
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        wiki_gen = WikiGenerator(root_path=root_path, data_dir=data_dir)
-        
-        result = wiki_gen.query_wiki_rag(query=question, top_k=top_k)
-        
-        if result.get("status") == "error":
-            raise HTTPException(status_code=400, detail=result.get("error"))
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error querying wiki: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to query wiki: {str(e)}")
