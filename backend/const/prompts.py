@@ -8,6 +8,9 @@ This module contains all prompt templates used for:
 - Interactive diagram generation
 """
 
+import json
+from typing import Optional, Dict
+
 # JSON Schemas for structured output enforcement
 
 DIAGRAM_SECTIONS_SCHEMA = {
@@ -711,5 +714,240 @@ Instructions:
 - Be clear, concise, and technical
 
 Answer:"""
+    
+    return prompt
+
+
+def build_wiki_problem_analysis_prompt(
+    user_prompt: str,
+    wiki_context: str,
+    codebase_context: str,
+    wiki_items: Optional[Dict[str, str]] = None
+) -> str:
+    """
+    Build prompt for analyzing whether a user's request is a question or modification request.
+    
+    Args:
+        user_prompt: User's request
+        wiki_context: Existing wiki content from RAG
+        codebase_context: Relevant codebase snippets
+        wiki_items: Optional dict of {wiki_name: question} pairs
+    
+    Returns:
+        Prompt string for LLM to analyze the request
+    """
+    wiki_items_section = ""
+    if wiki_items:
+        wiki_items_section = "\n\nSPECIFIC WIKI SECTIONS MENTIONED:\n"
+        for wiki_name, question in wiki_items.items():
+            q_text = f" - Question: {question}" if question else ""
+            wiki_items_section += f"- {wiki_name}{q_text}\n"
+    
+    prompt = f"""You are a technical documentation analyst. Analyze the user's request and determine if it's a QUESTION or a MODIFICATION REQUEST.
+
+EXISTING WIKI CONTENT:
+{wiki_context}
+
+CODEBASE CONTEXT:
+{codebase_context}
+{wiki_items_section}
+
+USER REQUEST:
+{user_prompt}
+
+CRITICAL DECISION RULES:
+1. If user asks "how", "what", "why", "explain", "tell me" → QUESTION (provide direct answer)
+2. If user says "add", "create", "update", "modify", "show me with diagram", "I need a diagram" → MODIFICATION (plan changes)
+3. If user says "I'm curious about X" or "I want to understand Y" → QUESTION (they want to learn, not create docs)
+4. If user explicitly requests documentation/diagram creation → MODIFICATION
+
+RESPONSE FORMAT - MUST FOLLOW EXACTLY:
+
+For QUESTION (user wants to learn):
+{{
+    "intent": "question",
+    "answer": "Your comprehensive answer using the wiki and codebase context"
+}}
+NOTE: If intent is "question", you MUST include "answer" field and MUST NOT include "modify" or "create" fields.
+
+For MODIFICATION REQUEST (user wants to add/change documentation):
+{{
+    "intent": "modification",
+    "reasoning": "Why this modification is appropriate",
+    "modify": [
+        {{
+            "wiki_name": "existing-section-id",
+            "reason": "Why this section needs modification",
+            "next_step_prompt": "Update the [section] to include [specific details from user request]..."
+        }}
+    ],
+    "create": [
+        {{
+            "wiki_name": "new-section-id",
+            "reason": "Why a new section is needed",
+            "next_step_prompt": "Create a diagram showing [specific requirements from user request]..."
+        }}
+    ]
+}}
+NOTE: If intent is "modification", you MUST include "reasoning", "modify", and "create" fields (arrays can be empty). You MUST NOT include "answer" field.
+
+EXAMPLES:
+
+Example 1 - QUESTION:
+User: "How does adalflow work with the localDB?"
+→ {{"intent": "question", "answer": "Adalflow integrates with localDB by..."}}
+
+Example 2 - MODIFICATION:
+User: "I need a diagram showing how adalflow works with localDB"
+→ {{"intent": "modification", "reasoning": "User wants visual documentation", "modify": [], "create": [{{"wiki_name": "adalflow-localdb-integration", "reason": "No existing diagram covers this", "next_step_prompt": "Create a flowchart showing adalflow's interaction with localDB..."}}]}}
+
+Example 3 - QUESTION (even with "curious"):
+User: "I'm curious about how the RAG system works"
+→ {{"intent": "question", "answer": "The RAG system uses..."}}
+
+Example 4 - MODIFICATION:
+User: "Add WikiCache to the architecture diagram"
+→ {{"intent": "modification", "reasoning": "Need to update existing diagram", "modify": [{{"wiki_name": "system-architecture", "reason": "WikiCache component missing", "next_step_prompt": "Update diagram to show WikiCache and its connections..."}}], "create": []}}
+
+Guidelines:
+- Default to QUESTION unless user explicitly requests documentation/diagram creation
+- Use kebab-case for wiki_name (e.g., "data-flow-diagram")
+- Provide detailed next_step_prompt that can be used directly for diagram generation
+- NEVER mix formats - question must not have modify/create, modification must not have answer
+
+Respond with valid JSON only:"""
+    
+    return prompt
+
+
+def build_wiki_creation_prompt(
+    wiki_name: str,
+    creation_prompt: str,
+    codebase_context: str
+) -> str:
+    """
+    Build prompt for creating a new wiki section.
+    
+    Args:
+        wiki_name: Name/ID of the new section
+        creation_prompt: Detailed requirements from problem analysis
+        codebase_context: Relevant code snippets
+    
+    Returns:
+        Prompt string for creating new wiki content
+    """
+    prompt = f"""You are creating a new wiki section for a codebase documentation system.
+
+SECTION NAME: {wiki_name}
+
+REQUIREMENTS:
+{creation_prompt}
+
+RELEVANT CODEBASE:
+{codebase_context}
+
+Generate a diagram section with the following JSON structure:
+{{
+    "section_id": "{wiki_name}",
+    "section_title": "Human-readable title",
+    "section_description": "What this diagram explains",
+    "diagram_type": "flowchart|sequence|class|stateDiagram|erDiagram",
+    "key_concepts": ["concept1", "concept2", "concept3"],
+    "mermaid_code": "Complete Mermaid diagram code here",
+    "diagram_description": "What the diagram shows",
+    "node_explanations": {{
+        "nodeId": "What this component does"
+    }},
+    "edge_explanations": {{
+        "source->target": "What this relationship means"
+    }}
+}}
+
+Guidelines:
+- Choose the most appropriate diagram type for the content
+- Include 5-10 key concepts
+- Generate valid Mermaid syntax
+- Provide detailed explanations for all nodes and edges
+- Base content on the codebase context provided
+
+Respond with valid JSON only:"""
+    
+    return prompt
+
+
+def build_wiki_modification_prompt(
+    wiki_name: str,
+    existing_content: Dict,
+    modification_prompt: str,
+    codebase_context: str
+) -> str:
+    """
+    Build prompt for modifying existing wiki content.
+    
+    Args:
+        wiki_name: Name/ID of the section to modify
+        existing_content: Current wiki section content
+        modification_prompt: What to change
+        codebase_context: Updated code snippets
+    
+    Returns:
+        Prompt string for modifying wiki content
+    """
+    # Extract existing diagram info
+    existing_diagram = existing_content.get('diagram', {})
+    existing_mermaid = existing_diagram.get('mermaid_code', '')
+    existing_type = existing_diagram.get('diagram_type', 'flowchart')
+    
+    # Extract first line to preserve diagram type
+    first_line = existing_mermaid.split('\n')[0].strip() if existing_mermaid else f"{existing_type} TD"
+    
+    prompt = f"""You are modifying an existing wiki section for a codebase documentation system.
+
+SECTION NAME: {wiki_name}
+
+CURRENT CONTENT:
+- Title: {existing_content.get('section_title', '')}
+- Description: {existing_content.get('section_description', '')}
+- Diagram Type: {existing_type}
+- Number of nodes: {len(existing_content.get('nodes', {}))}
+- Number of edges: {len(existing_content.get('edges', {}))}
+
+EXISTING MERMAID DIAGRAM:
+{existing_mermaid}
+
+MODIFICATION REQUESTED:
+{modification_prompt}
+
+UPDATED CODEBASE CONTEXT:
+{codebase_context}
+
+Generate the MODIFIED version. IMPORTANT: Keep the diagram type and structure, only update as requested.
+
+REQUIRED JSON FORMAT:
+{{
+    "section_id": "{wiki_name}",
+    "section_title": "{existing_content.get('section_title', 'Architecture Diagram')}",
+    "section_description": "Updated description incorporating the requested changes",
+    "diagram_type": "{existing_type}",
+    "key_concepts": ["updated", "concepts", "list"],
+    "mermaid_code": "MUST start with: {first_line}\\n...rest of diagram...",
+    "diagram_description": "Description of changes made",
+    "node_explanations": {{
+        "nodeId": "Explanation for this node"
+    }},
+    "edge_explanations": {{
+        "nodeA->nodeB": "Explanation for this connection"
+    }}
+}}
+
+CRITICAL RULES:
+1. The mermaid_code MUST start with "{first_line}" to maintain diagram type
+2. Preserve existing structure - only add/modify based on the request
+3. Ensure all new nodes have explanations
+4. Ensure all new edges have explanations
+5. Keep valid Mermaid syntax (proper node IDs, edge formats)
+6. Use same node naming style as existing diagram
+
+Respond with valid JSON only:"""
     
     return prompt

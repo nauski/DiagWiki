@@ -561,3 +561,123 @@ async def generate_section_diagram(request: SectionDiagramRequest = Body(...)):
     except Exception as e:
         logger.error(f"Error generating section diagram: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate section diagram: {str(e)}")
+
+
+# Pydantic models for wiki problem analysis and modification
+class WikiItem(BaseModel):
+    wiki_name: str = Field(..., description="Name/ID of the wiki section")
+    question: Optional[str] = Field(None, description="Optional question about this wiki section")
+
+
+class WikiProblemRequest(BaseModel):
+    root_path: str = Field(..., description="Root path to the folder")
+    prompt: str = Field(..., description="User's request describing the problem or modification needed")
+    wiki_items: Optional[List[WikiItem]] = Field(None, description="Optional list of wiki sections with questions")
+
+
+class ModifyOrCreateWikiRequest(BaseModel):
+    root_path: str = Field(..., description="Root path to the folder")
+    next_step_prompt: str = Field(..., description="Detailed prompt for wiki generation/modification")
+    wiki_name: str = Field(..., description="Name/ID of the wiki section to create or modify")
+    is_new: bool = Field(..., description="Whether this is a new wiki section or modification of existing")
+
+
+@app.post("/wikiProblem")
+async def wiki_problem(request: WikiProblemRequest = Body(...)):
+    """
+    Analyze a user's wiki-related request and determine if modifications are needed.
+    
+    This endpoint:
+    1. Retrieves relevant wiki content using RAG
+    2. Analyzes the user's prompt to determine intent
+    3. Decides if this is a question (answer directly) or modification request
+    4. If modification needed, returns structured plan with next-step prompts
+    
+    Args:
+        request: WikiProblemRequest with root_path, prompt, and optional wiki_items
+        
+    Returns:
+        JSON with either:
+        - answer: Direct answer to the question
+        - plan: Structured modification plan with modify/create actions
+    """
+    try:
+        logger.info(f"Analyzing wiki problem for: {request.root_path}")
+        logger.info(f"User prompt: {request.prompt[:100]}...")
+        
+        # Validate folder
+        if not os.path.exists(request.root_path):
+            raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
+        
+        # Use WikiGenerator to analyze the problem
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        wiki_gen = WikiGenerator(root_path=request.root_path, data_dir=data_dir)
+        
+        # Convert wiki_items to dict format
+        wiki_items_dict = None
+        if request.wiki_items:
+            wiki_items_dict = {
+                item.wiki_name: item.question 
+                for item in request.wiki_items
+            }
+        
+        result = wiki_gen.analyze_wiki_problem(
+            user_prompt=request.prompt,
+            wiki_items=wiki_items_dict
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing wiki problem: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to analyze wiki problem: {str(e)}")
+
+
+@app.post("/modifyOrCreateWiki")
+async def modify_or_create_wiki(request: ModifyOrCreateWikiRequest = Body(...)):
+    """
+    Create a new wiki section or modify an existing one.
+    
+    This endpoint:
+    1. If is_new=True: Generates a new diagram section
+    2. If is_new=False: Modifies existing wiki content based on prompt
+    
+    Args:
+        request: ModifyOrCreateWikiRequest with root_path, next_step_prompt, wiki_name, is_new
+        
+    Returns:
+        JSON with the created/modified wiki section
+    """
+    try:
+        logger.info(f"{'Creating new' if request.is_new else 'Modifying'} wiki section: {request.wiki_name}")
+        
+        # Validate folder
+        if not os.path.exists(request.root_path):
+            raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
+        
+        # Use WikiGenerator to create or modify wiki
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        wiki_gen = WikiGenerator(root_path=request.root_path, data_dir=data_dir)
+        
+        if request.is_new:
+            # Create new wiki section
+            result = wiki_gen.create_wiki_section(
+                wiki_name=request.wiki_name,
+                prompt=request.next_step_prompt
+            )
+        else:
+            # Modify existing wiki section
+            result = wiki_gen.modify_wiki_section(
+                wiki_name=request.wiki_name,
+                modification_prompt=request.next_step_prompt
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating/modifying wiki: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create/modify wiki: {str(e)}")

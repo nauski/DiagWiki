@@ -416,290 +416,463 @@ class WikiGenerator:
             diagram_type, key_concepts, language, use_cache
         )
     
-    # DEPRECATED: This method is kept for backward compatibility but is not used by the current API.
-    # The two-step approach (identify_diagram_sections + generate_section_diagram) is preferred.
-    def generate_page_with_diagrams(
+    def analyze_wiki_problem(
         self,
-        page_title: str,
-        page_description: str,
-        relevant_files: List[str],
-        language: str = "en",
-        page_id: str = None,
-        use_cache: bool = True
+        user_prompt: str,
+        wiki_items: Optional[Dict[str, str]] = None
     ) -> Dict:
         """
-        Generate wiki page with interactive diagrams using two-step approach.
-        
-        Step 1: Identify diagram-worthy sections
-        Step 2: Generate focused diagram for each section
+        Analyze a user's wiki-related request and determine if modifications are needed.
         
         Args:
-            page_title: Title of the page
-            page_description: Description of what the page should cover
-            relevant_files: List of relevant file paths (hints)
-            language: Target language code
-            page_id: Optional page ID for caching
-            use_cache: Whether to use cached page if available
+            user_prompt: User's request describing the problem or question
+            wiki_items: Optional dict of {wiki_name: question} pairs
         
         Returns:
-            Dict with status, sections containing diagrams with node/edge explanations
+            Dict with either answer (for questions) or modification plan
         """
-        # Generate page_id if not provided
-        if page_id is None:
-            page_id = page_title.lower().replace(' ', '_').replace('/', '_')
-        
-        # Check cache first
-        if use_cache:
-            cache_file = os.path.join(self.cache.pages_dir, f"{page_id}_diagrams.json")
-            if os.path.exists(cache_file):
-                logger.info(f"Using cached diagram page: {page_title}")
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+        from const.prompts import build_wiki_problem_analysis_prompt
+        from adalflow.core.db import LocalDB
         
         # Ensure RAG is initialized
         self.initialize_rag()
         
-        # Generate RAG queries
-        rag_queries = build_page_analysis_queries(page_title, page_description)
+        # Retrieve existing wiki content from wiki database
+        wiki_context = ""
+        wiki_db_path = self.cache.wiki_db_path
         
-        # Perform RAG queries
-        logger.info(f"Performing {len(rag_queries)} RAG queries for: {page_title}")
-        rag_results = []
-        all_retrieved_docs = []
-        
-        for query in rag_queries:
+        if os.path.exists(wiki_db_path):
             try:
-                result = self.rag.call(
-                    query=query,
-                    top_k=8,
-                    use_reranking=True
-                )
-                rag_results.append({
-                    "query": query,
-                    "answer": result.answer,
-                    "rationale": result.rationale
-                })
-                all_retrieved_docs.extend(result.documents)
-                logger.info(f"RAG query completed: {query[:60]}...")
+                wiki_db = LocalDB.load_state(filepath=wiki_db_path)
+                wiki_docs = wiki_db.get_transformed_data(key="wiki_content")
+                
+                if wiki_docs:
+                    wiki_context = "\n\n".join([
+                        f"[{doc.meta_data.get('content_id', 'unknown')}]\n{doc.text[:500]}"
+                        for doc in wiki_docs[:10]
+                    ])
+                    logger.info(f"Retrieved {len(wiki_docs)} wiki documents")
             except Exception as e:
-                logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
+                logger.warning(f"Could not load wiki context: {e}")
         
-        # Build RAG context
-        rag_context = "\n\n".join([
-            f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
-            for r in rag_results
-        ])
+        if not wiki_context:
+            wiki_context = "No existing wiki content found."
         
-        # Step 1: Identify diagram sections
-        logger.info("Step 1: Identifying diagram sections...")
-        sections_prompt = build_diagram_sections_prompt(
-            page_title=page_title,
-            page_description=page_description,
-            rag_context=rag_context,
-            language=language
+        # Query codebase for relevant context
+        try:
+            rag_answer, codebase_docs = self.rag.call(
+                query=user_prompt,
+                top_k=5,
+                use_reranking=True
+            )
+            
+            codebase_context = "\n\n".join([
+                f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:500]}"
+                for doc in codebase_docs[:5]
+            ])
+        except Exception as e:
+            logger.warning(f"Could not query codebase: {e}")
+            codebase_context = "Codebase context unavailable."
+        
+        # Build analysis prompt
+        prompt = build_wiki_problem_analysis_prompt(
+            user_prompt=user_prompt,
+            wiki_context=wiki_context,
+            codebase_context=codebase_context,
+            wiki_items=wiki_items
         )
         
+        # Call LLM
         model = OllamaClient()
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "format": "json",
-            "options": {
-                "temperature": 0.7,
-                "num_ctx": 8192
-            }
+            "options": {"temperature": 0.7, "num_ctx": 16384}
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=sections_prompt,
+            input=prompt,
             model_kwargs=model_kwargs,
             model_type=ModelType.LLM
         )
         
         response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
         
-        # Extract content
+        # Extract response
         if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            sections_json = response.message.content
+            response_text = response.message.content
         else:
-            sections_json = str(response)
+            response_text = str(response)
         
         try:
-            sections_data = json.loads(sections_json)
-            identified_sections = sections_data.get('sections', [])
-            logger.info(f"Identified {len(identified_sections)} sections for diagrams")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse sections JSON: {e}")
-            identified_sections = []
-        
-        # Deduplicate documents for retrieval
-        seen_paths = {}
-        unique_docs = []
-        for doc in all_retrieved_docs:
-            file_path = doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'
-            if file_path not in seen_paths:
-                seen_paths[file_path] = doc
-                unique_docs.append(doc)
-        
-        retrieved_sources = "\n\n".join([
-            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:800]}"
-            for i, doc in enumerate(unique_docs[:15])
-        ])
-        
-        # Step 2: Generate diagram for each section
-        logger.info("Step 2: Generating diagrams for each section...")
-        processed_sections = []
-        
-        for section in identified_sections:
-            section_id = section.get('section_id', '')
-            section_title = section.get('section_title', '')
-            section_description = section.get('section_description', '')
-            diagram_type = section.get('diagram_type', 'flowchart')
-            key_concepts = section.get('key_concepts', [])
+            result = json.loads(response_text)
             
-            logger.info(f"Generating diagram for: {section_title}")
+            # Validate response format
+            intent = result.get('intent')
             
-            # Check if this diagram is already cached (new format: diag_{section_id})
-            section_cache_file = os.path.join(self.cache.diagrams_dir, f"diag_{section_id}.json")
-            if use_cache and os.path.exists(section_cache_file):
-                logger.info(f"✅ Using cached diagram for section: {section_title}")
-                try:
-                    with open(section_cache_file, 'r', encoding='utf-8') as f:
-                        cached_section = json.load(f)
-                        processed_sections.append({
-                            "section_id": section_id,
-                            "section_title": section_title,
-                            "section_description": section_description,
-                            "importance": section.get('importance', 'medium'),
-                            "diagram": cached_section['diagram'],
-                            "nodes": cached_section['nodes'],
-                            "edges": cached_section['edges']
-                        })
-                        continue
-                except Exception as e:
-                    logger.warning(f"Failed to load cached diagram: {e}, regenerating...")
+            if intent == 'question':
+                # For questions, must have 'answer' field and NOT have 'modify'/'create'
+                if 'answer' not in result:
+                    logger.error("Question intent but missing 'answer' field")
+                    return {
+                        "status": "error",
+                        "error": "Invalid response: question intent requires 'answer' field",
+                        "raw_response": response_text[:500]
+                    }
+                if 'modify' in result or 'create' in result:
+                    logger.warning("Question intent should not have 'modify'/'create' fields, removing them")
+                    result.pop('modify', None)
+                    result.pop('create', None)
             
-            # Build diagram prompt
-            diagram_prompt = build_single_diagram_prompt(
-                page_title=page_title,
-                section_title=section_title,
-                section_description=section_description,
-                diagram_type=diagram_type,
-                key_concepts=key_concepts,
-                rag_context=rag_context,
-                retrieved_sources=retrieved_sources,
-                language=language
-            )
+            elif intent == 'modification':
+                # For modifications, must have 'modify'/'create' and NOT have 'answer'
+                if 'modify' not in result or 'create' not in result:
+                    logger.error("Modification intent but missing 'modify'/'create' fields")
+                    return {
+                        "status": "error",
+                        "error": "Invalid response: modification intent requires 'modify' and 'create' fields",
+                        "raw_response": response_text[:500]
+                    }
+                if 'answer' in result:
+                    logger.warning("Modification intent should not have 'answer' field, removing it")
+                    result.pop('answer', None)
             
-            # Call LLM for diagram
-            model_kwargs = {
-                "model": Const.GENERATION_MODEL,
-                "format": "json",
-                "options": {
-                    "temperature": 0.7,
-                    "num_ctx": 16384
-                }
-            }
-            
-            api_kwargs = model.convert_inputs_to_api_kwargs(
-                input=diagram_prompt,
-                model_kwargs=model_kwargs,
-                model_type=ModelType.LLM
-            )
-            
-            diagram_response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-            
-            # Extract diagram content
-            if hasattr(diagram_response, 'message') and hasattr(diagram_response.message, 'content'):
-                diagram_json = diagram_response.message.content
             else:
-                diagram_json = str(diagram_response)
+                logger.error(f"Unknown intent: {intent}")
+                return {
+                    "status": "error",
+                    "error": f"Invalid intent: {intent}. Must be 'question' or 'modification'",
+                    "raw_response": response_text[:500]
+                }
             
-            try:
-                diagram_data = json.loads(diagram_json)
-                mermaid_code = diagram_data.get('mermaid_code', '')
-                diagram_description = diagram_data.get('diagram_description', '')
-                node_explanations = diagram_data.get('node_explanations', {})
-                edge_explanations = diagram_data.get('edge_explanations', {})
-                
-                # Validate and parse mermaid code
-                is_valid, validation_msg = validate_mermaid_syntax(mermaid_code)
-                
-                if is_valid:
-                    parsed = parse_mermaid_diagram(mermaid_code)
-                    
-                    # Combine LLM explanations with parsed structure
-                    nodes = {}
-                    for node_id in parsed['node_list']:
-                        node_data = parsed['nodes'][node_id]
-                        nodes[node_id] = {
-                            "label": node_data['label'],
-                            "shape": node_data['shape'],
-                            "explanation": node_explanations.get(node_id, "")
-                        }
-                    
-                    edges = {}
-                    for edge in parsed['edges']:
-                        edge_key = edge['key']
-                        edges[edge_key] = {
-                            "source": edge['source'],
-                            "target": edge['target'],
-                            "label": edge['label'],
-                            "explanation": edge_explanations.get(edge_key, "")
-                        }
-                    
-                    processed_sections.append({
-                        "section_id": section_id,
-                        "section_title": section_title,
-                        "section_description": section_description,
-                        "importance": section.get('importance', 'medium'),
-                        "diagram": {
-                            "mermaid_code": mermaid_code,
-                            "description": diagram_description,
-                            "is_valid": True,
-                            "diagram_type": parsed['diagram_type']
-                        },
-                        "nodes": nodes,
-                        "edges": edges
-                    })
-                    
-                    logger.info(f"Successfully generated diagram for: {section_title}")
-                else:
-                    logger.warning(f"Invalid Mermaid syntax for {section_title}: {validation_msg}")
-                    # Still include but mark as invalid
-                    processed_sections.append({
-                        "section_id": section_id,
-                        "section_title": section_title,
-                        "section_description": section_description,
-                        "diagram": {
-                            "mermaid_code": mermaid_code,
-                            "description": diagram_description,
-                            "is_valid": False,
-                            "error": validation_msg
-                        },
-                        "nodes": {},
-                        "edges": {}
-                    })
-                    
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse diagram JSON for {section_title}: {e}")
-                continue
+            result["status"] = "success"
+            return result
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response: {e}")
+            return {
+                "status": "error",
+                "error": "Failed to parse analysis",
+                "raw_response": response_text[:500]
+            }
+    
+    def create_wiki_section(
+        self,
+        wiki_name: str,
+        prompt: str
+    ) -> Dict:
+        """
+        Create a new wiki section based on a detailed prompt.
         
-        result = {
-            "status": "success",
-            "page_title": page_title,
-            "page_description": page_description,
-            "language": language,
-            "sections_identified": len(identified_sections),
-            "diagrams_generated": len(processed_sections),
-            "sections": processed_sections,
-            "cached": False
+        Args:
+            wiki_name: ID/name for the new section
+            prompt: Detailed creation prompt from problem analysis
+        
+        Returns:
+            Dict with the created wiki section
+        """
+        from const.prompts import build_wiki_creation_prompt
+        from utils.mermaid_parser import parse_mermaid_diagram, validate_mermaid_syntax
+        
+        # Ensure RAG is initialized
+        self.initialize_rag()
+        
+        # Query codebase for relevant context
+        try:
+            rag_answer, codebase_docs = self.rag.call(
+                query=prompt,
+                top_k=8,
+                use_reranking=True
+            )
+            
+            codebase_context = "\n\n".join([
+                f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:800]}"
+                for doc in codebase_docs[:8]
+            ])
+        except Exception as e:
+            logger.warning(f"Could not query codebase: {e}")
+            codebase_context = "Codebase context unavailable."
+        
+        # Build creation prompt
+        creation_prompt = build_wiki_creation_prompt(
+            wiki_name=wiki_name,
+            creation_prompt=prompt,
+            codebase_context=codebase_context
+        )
+        
+        # Call LLM
+        model = OllamaClient()
+        model_kwargs = {
+            "model": Const.GENERATION_MODEL,
+            "format": "json",
+            "options": {"temperature": 0.7, "num_ctx": 16384}
         }
         
-        # Cache the result
-        if use_cache:
-            cache_file = os.path.join(self.cache.pages_dir, f"{page_id}_diagrams.json")
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2)
-            logger.info(f"Cached diagram page: {cache_file}")
+        api_kwargs = model.convert_inputs_to_api_kwargs(
+            input=creation_prompt,
+            model_kwargs=model_kwargs,
+            model_type=ModelType.LLM
+        )
         
-        return result
+        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
+        
+        # Extract response
+        if hasattr(response, 'message') and hasattr(response.message, 'content'):
+            response_text = response.message.content
+        else:
+            response_text = str(response)
+        
+        try:
+            diagram_data = json.loads(response_text)
+            
+            # Validate and parse mermaid code
+            mermaid_code = diagram_data.get('mermaid_code', '')
+            is_valid, validation_msg = validate_mermaid_syntax(mermaid_code)
+            
+            if is_valid:
+                parsed = parse_mermaid_diagram(mermaid_code)
+                
+                # Structure the result
+                result = {
+                    "status": "success",
+                    "section_id": wiki_name,
+                    "section_title": diagram_data.get('section_title', ''),
+                    "section_description": diagram_data.get('section_description', ''),
+                    "language": "en",
+                    "diagram": {
+                        "mermaid_code": mermaid_code,
+                        "description": diagram_data.get('diagram_description', ''),
+                        "is_valid": True,
+                        "diagram_type": parsed['diagram_type']
+                    },
+                    "nodes": {},
+                    "edges": {},
+                    "cached": False
+                }
+                
+                # Add node explanations
+                node_explanations = diagram_data.get('node_explanations', {})
+                for node_id in parsed['node_list']:
+                    node_data = parsed['nodes'][node_id]
+                    result['nodes'][node_id] = {
+                        "label": node_data['label'],
+                        "shape": node_data['shape'],
+                        "explanation": node_explanations.get(node_id, "")
+                    }
+                
+                # Add edge explanations
+                edge_explanations = diagram_data.get('edge_explanations', {})
+                for edge in parsed['edges']:
+                    edge_key = edge['key']
+                    result['edges'][edge_key] = {
+                        "source": edge['source'],
+                        "target": edge['target'],
+                        "label": edge['label'],
+                        "explanation": edge_explanations.get(edge_key, "")
+                    }
+                
+                # Cache the result
+                cache_file = os.path.join(self.cache.diagrams_dir, f"diag_{wiki_name}.json")
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2, ensure_ascii=False)
+                
+                # Save Mermaid code separately
+                mermaid_file = os.path.join(self.cache.diagrams_dir, f"diag_{wiki_name}.mmd")
+                with open(mermaid_file, 'w', encoding='utf-8') as f:
+                    f.write(mermaid_code)
+                
+                # Add to wiki RAG database
+                try:
+                    self.cache.add_wiki_content_to_rag(
+                        content_type="diagram",
+                        content_id=wiki_name,
+                        content_data=result
+                    )
+                    logger.info(f"Added new wiki section to RAG: {wiki_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to add to wiki RAG: {e}")
+                
+                return result
+            else:
+                return {
+                    "status": "error",
+                    "error": f"Invalid Mermaid syntax: {validation_msg}",
+                    "diagram": diagram_data
+                }
+        
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse creation response: {e}")
+            return {
+                "status": "error",
+                "error": "Failed to parse diagram data",
+                "raw_response": response_text[:500]
+            }
+    
+    def modify_wiki_section(
+        self,
+        wiki_name: str,
+        modification_prompt: str
+    ) -> Dict:
+        """
+        Modify an existing wiki section.
+        
+        Args:
+            wiki_name: ID/name of the section to modify
+            modification_prompt: What to change
+        
+        Returns:
+            Dict with the modified wiki section
+        """
+        from const.prompts import build_wiki_modification_prompt
+        from utils.mermaid_parser import parse_mermaid_diagram, validate_mermaid_syntax
+        
+        # Ensure RAG is initialized
+        self.initialize_rag()
+        
+        # Load existing content
+        cache_file = os.path.join(self.cache.diagrams_dir, f"diag_{wiki_name}.json")
+        if not os.path.exists(cache_file):
+            return {
+                "status": "error",
+                "error": f"Wiki section '{wiki_name}' not found. Use create instead."
+            }
+        
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                existing_content = json.load(f)
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"Failed to load existing content: {e}"
+            }
+        
+        # Query codebase for updated context
+        try:
+            rag_answer, codebase_docs = self.rag.call(
+                query=f"{existing_content.get('section_title', '')} {modification_prompt}",
+                top_k=8,
+                use_reranking=True
+            )
+            
+            codebase_context = "\n\n".join([
+                f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:800]}"
+                for doc in codebase_docs[:8]
+            ])
+        except Exception as e:
+            logger.warning(f"Could not query codebase: {e}")
+            codebase_context = "Codebase context unavailable."
+        
+        # Build modification prompt
+        mod_prompt = build_wiki_modification_prompt(
+            wiki_name=wiki_name,
+            existing_content=existing_content,
+            modification_prompt=modification_prompt,
+            codebase_context=codebase_context
+        )
+        
+        # Call LLM
+        model = OllamaClient()
+        model_kwargs = {
+            "model": Const.GENERATION_MODEL,
+            "format": "json",
+            "options": {"temperature": 0.7, "num_ctx": 16384}
+        }
+        
+        api_kwargs = model.convert_inputs_to_api_kwargs(
+            input=mod_prompt,
+            model_kwargs=model_kwargs,
+            model_type=ModelType.LLM
+        )
+        
+        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
+        
+        # Extract response
+        if hasattr(response, 'message') and hasattr(response.message, 'content'):
+            response_text = response.message.content
+        else:
+            response_text = str(response)
+        
+        try:
+            diagram_data = json.loads(response_text)
+            
+            # Validate and parse mermaid code
+            mermaid_code = diagram_data.get('mermaid_code', '')
+            is_valid, validation_msg = validate_mermaid_syntax(mermaid_code)
+            
+            if is_valid:
+                parsed = parse_mermaid_diagram(mermaid_code)
+                
+                # Structure the result
+                result = {
+                    "status": "success",
+                    "section_id": wiki_name,
+                    "section_title": diagram_data.get('section_title', ''),
+                    "section_description": diagram_data.get('section_description', ''),
+                    "language": existing_content.get('language', 'en'),
+                    "diagram": {
+                        "mermaid_code": mermaid_code,
+                        "description": diagram_data.get('diagram_description', ''),
+                        "is_valid": True,
+                        "diagram_type": parsed['diagram_type']
+                    },
+                    "nodes": {},
+                    "edges": {},
+                    "cached": False,
+                    "modified": True
+                }
+                
+                # Add node explanations
+                node_explanations = diagram_data.get('node_explanations', {})
+                for node_id in parsed['node_list']:
+                    node_data = parsed['nodes'][node_id]
+                    result['nodes'][node_id] = {
+                        "label": node_data['label'],
+                        "shape": node_data['shape'],
+                        "explanation": node_explanations.get(node_id, "")
+                    }
+                
+                # Add edge explanations
+                edge_explanations = diagram_data.get('edge_explanations', {})
+                for edge in parsed['edges']:
+                    edge_key = edge['key']
+                    result['edges'][edge_key] = {
+                        "source": edge['source'],
+                        "target": edge['target'],
+                        "label": edge['label'],
+                        "explanation": edge_explanations.get(edge_key, "")
+                    }
+                
+                # Cache the modified result
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2, ensure_ascii=False)
+                
+                # Save Mermaid code separately
+                mermaid_file = os.path.join(self.cache.diagrams_dir, f"diag_{wiki_name}.mmd")
+                with open(mermaid_file, 'w', encoding='utf-8') as f:
+                    f.write(mermaid_code)
+                
+                # Update wiki RAG database
+                try:
+                    self.cache.add_wiki_content_to_rag(
+                        content_type="diagram",
+                        content_id=wiki_name,
+                        content_data=result
+                    )
+                    logger.info(f"Updated wiki section in RAG: {wiki_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to update wiki RAG: {e}")
+                
+                return result
+            else:
+                return {
+                    "status": "error",
+                    "error": f"Invalid Mermaid syntax: {validation_msg}",
+                    "diagram": diagram_data
+                }
+        
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse modification response: {e}")
+            return {
+                "status": "error",
+                "error": "Failed to parse diagram data",
+                "raw_response": response_text[:500]
+            }
