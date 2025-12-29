@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentProject, projectHistory, addToHistory, isAnalyzing, availableSections, openDiagramTab, generatedDiagrams } from '$lib/stores';
+	import { currentProject, projectHistory, addToHistory, isAnalyzing, availableSections, openDiagramTab, generatedDiagrams, diagramCache } from '$lib/stores';
 	import { identifyDiagramSections, generateSectionDiagram } from '$lib/api';
 
 	let folderPath = '';
@@ -48,6 +48,14 @@
 				const diagram = await generateSectionDiagram(folderPath, section);
 				// If successful, it's cached
 				cachedSections.push(section);
+				
+				// Add to frontend cache
+				diagramCache.update(cache => {
+					const newCache = new Map(cache);
+					newCache.set(section.section_id, diagram);
+					return newCache;
+				});
+				
 				generatedDiagrams.update(set => {
 					const newSet = new Set(set);
 					newSet.add(section.section_id);
@@ -134,7 +142,7 @@
 		<!-- Folder Input -->
 		<div class="bg-white rounded-lg shadow-sm p-6 mb-6">
 			<label for="folder" class="block text-sm font-medium text-gray-700 mb-2">
-				Project Folder
+				Project Folder Path
 			</label>
 			<div class="flex gap-2">
 				<input

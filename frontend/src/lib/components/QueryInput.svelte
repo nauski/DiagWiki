@@ -1,12 +1,13 @@
 <script lang="ts">
-	import { currentProject } from '$lib/stores';
-	import { queryWithWiki } from '$lib/api';
+	import { currentProject, availableSections } from '$lib/stores';
+	import { queryWikiProblem, generateSectionDiagram } from '$lib/api';
 
 	let query = '';
 	let isQuerying = false;
 	let result: any = null;
 	let error = '';
 	let isExpanded = true;
+	let isExecuting = false;
 
 	async function handleSubmit() {
 		if (!query.trim() || !$currentProject || isQuerying) return;
@@ -16,13 +17,93 @@
 		result = null;
 
 		try {
-			const response = await queryWithWiki($currentProject, query, true);
+			const response = await queryWikiProblem($currentProject, query);
 			result = response;
 			isExpanded = true;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Query failed';
 		} finally {
 			isQuerying = false;
+		}
+	}
+
+	async function handleExecutePlan() {
+		if (!result || !$currentProject || isExecuting) return;
+		
+		isExecuting = true;
+		error = '';
+
+		try {
+			const modifications = result.modify || [];
+			const creations = result.create || [];
+			
+			// Execute modifications first
+			for (const mod of modifications) {
+				try {
+					const response = await fetch('http://localhost:8001/modifyOrCreateWiki', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							root_path: $currentProject,
+							next_step_prompt: mod.next_step_prompt,
+							wiki_name: mod.wiki_name,
+							is_new: false
+						})
+					});
+					if (!response.ok) {
+						console.error(`Failed to modify ${mod.wiki_name}`);
+					}
+				} catch (err) {
+					console.error(`Error modifying ${mod.wiki_name}:`, err);
+				}
+			}
+			
+			// Execute creations
+			for (const creation of creations) {
+				try {
+					const response = await fetch('http://localhost:8001/modifyOrCreateWiki', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							root_path: $currentProject,
+							next_step_prompt: creation.next_step_prompt,
+							wiki_name: creation.wiki_name,
+							is_new: true
+						})
+					});
+					
+					if (response.ok) {
+						const diagram = await response.json();
+						
+						// Add new section to availableSections
+						availableSections.update(sections => {
+							if (!sections.some(s => s.section_id === diagram.section_id)) {
+								return [...sections, {
+									section_id: diagram.section_id,
+									section_title: diagram.section_title,
+									section_description: diagram.section_description,
+									diagram_type: diagram.diagram?.diagram_type || 'flowchart',
+									key_concepts: []
+								}];
+							}
+							return sections;
+						});
+					}
+				} catch (err) {
+					console.error(`Error creating ${creation.wiki_name}:`, err);
+				}
+			}
+			
+			// Clear result to show success
+			result = { 
+				status: 'success',
+				intent: 'question',
+				answer: 'Plan executed successfully! New sections are now available in the left panel.'
+			};
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to execute plan';
+		} finally {
+			isExecuting = false;
 		}
 	}
 
@@ -35,6 +116,50 @@
 
 	function toggleExpand() {
 		isExpanded = !isExpanded;
+	}
+	
+	// Format plain text from answer (remove markdown formatting)
+	function formatPlainText(text: string): string {
+		if (!text) return '';
+		// Remove markdown formatting
+		return text
+			.replace(/\*\*(.+?)\*\*/g, '$1') // Bold
+			.replace(/\*(.+?)\*/g, '$1')     // Italic
+			.replace(/`(.+?)`/g, '$1')       // Code
+			.replace(/#+\s/g, '')            // Headers
+			.replace(/\[(.+?)\]\(.+?\)/g, '$1'); // Links
+	}
+	
+	// Format modification plan as plain text
+	function formatPlan(result: any): string {
+		let plan = '';
+		
+		if (result.reasoning) {
+			plan += 'Reasoning: ' + formatPlainText(result.reasoning) + '\n\n';
+		}
+		
+		if (result.modify && result.modify.length > 0) {
+			plan += 'Modifications:\n';
+			result.modify.forEach((mod: any, i: number) => {
+				plan += `${i + 1}. ${mod.wiki_name}\n`;
+				if (mod.reasoning) {
+					plan += `   Reason: ${formatPlainText(mod.reasoning)}\n`;
+				}
+			});
+			plan += '\n';
+		}
+		
+		if (result.create && result.create.length > 0) {
+			plan += 'New Sections to Create:\n';
+			result.create.forEach((creation: any, i: number) => {
+				plan += `${i + 1}. ${creation.wiki_name}\n`;
+				if (creation.reasoning) {
+					plan += `   Reason: ${formatPlainText(creation.reasoning)}\n`;
+				}
+			});
+		}
+		
+		return plan;
 	}
 </script>
 
@@ -69,7 +194,9 @@
 				on:click={toggleExpand}
 				class="w-full flex items-center justify-between px-3 py-2 bg-blue-100 hover:bg-blue-150 transition-colors"
 			>
-				<span class="text-xs font-semibold text-blue-700 uppercase">Answer</span>
+				<span class="text-xs font-semibold text-blue-700 uppercase">
+					{result.intent === 'modification' ? 'Modification Plan' : 'Answer'}
+				</span>
 				<svg
 					class="w-4 h-4 transform transition-transform {isExpanded ? 'rotate-180' : ''}"
 					fill="currentColor"
@@ -80,7 +207,22 @@
 			</button>
 			{#if isExpanded}
 				<div class="p-3 overflow-y-auto" style="max-height: calc(30vh - 40px);">
-					<p class="text-sm text-gray-900 whitespace-pre-wrap">{result.answer?.content || result.answer || JSON.stringify(result, null, 2)}</p>
+					{#if result.intent === 'question'}
+						<p class="text-sm text-gray-900 whitespace-pre-wrap">{formatPlainText(result.answer || '')}</p>
+					{:else if result.intent === 'modification'}
+						<p class="text-sm text-gray-900 whitespace-pre-wrap">{formatPlan(result)}</p>
+						<div class="mt-3 pt-3 border-t border-blue-200">
+							<button
+								on:click={handleExecutePlan}
+								disabled={isExecuting}
+								class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+							>
+								{isExecuting ? 'Executing...' : 'Confirm & Execute Plan'}
+							</button>
+						</div>
+					{:else}
+						<p class="text-sm text-gray-900">{JSON.stringify(result, null, 2)}</p>
+					{/if}
 				</div>
 			{/if}
 		</div>

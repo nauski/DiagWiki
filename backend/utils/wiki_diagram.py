@@ -505,6 +505,10 @@ Return ONLY the title text, nothing else."""
                     f.write(result['diagram']['mermaid_code'])
                 logger.info(f"💾 Cached Mermaid code to: {result['mermaid_file']}")
             
+            # If this is a custom section, add it to the sections cache
+            if result.get('section_id', '').startswith('custom_'):
+                self._add_custom_section_to_cache(result)
+            
             # Add to wiki RAG database for /askWiki endpoint
             try:
                 self.cache.add_wiki_content_to_rag(
@@ -515,3 +519,52 @@ Return ONLY the title text, nothing else."""
                 logger.info(f"📚 Added diagram to wiki RAG: {result['section_id']}")
             except Exception as e:
                 logger.warning(f"Failed to add diagram to wiki RAG: {e}")
+    
+    def _add_custom_section_to_cache(self, result: Dict):
+        """Add a custom section to the sections cache file."""
+        try:
+            repo_name = os.path.basename(self.root_path)
+            page_id = repo_name.lower().replace(' ', '_').replace('/', '_')
+            sections_file = os.path.join(self.cache.diagrams_dir, f"{page_id}_sections.json")
+            
+            # Create new section metadata
+            new_section = {
+                "section_id": result['section_id'],
+                "section_title": result['section_title'],
+                "section_description": result.get('section_description', result['section_title']),
+                "diagram_type": result['diagram'].get('diagram_type', 'flowchart'),
+                "key_concepts": []
+            }
+            
+            # Load existing sections or create new file
+            if os.path.exists(sections_file):
+                with open(sections_file, 'r', encoding='utf-8') as f:
+                    sections_data = json.load(f)
+            else:
+                sections_data = {
+                    "status": "success",
+                    "repo_name": repo_name,
+                    "language": "en",
+                    "sections": [],
+                    "cached": False
+                }
+            
+            # Check if this custom section already exists
+            sections = sections_data.get('sections', [])
+            existing_ids = [s['section_id'] for s in sections]
+            
+            if new_section['section_id'] not in existing_ids:
+                sections.append(new_section)
+                sections_data['sections'] = sections
+                
+                # Save updated sections
+                with open(sections_file, 'w', encoding='utf-8') as f:
+                    json.dump(sections_data, f, indent=2, ensure_ascii=False)
+                
+                logger.info(f"✅ Added custom section to cache: {new_section['section_id']}")
+            else:
+                logger.info(f"ℹ️  Custom section already in cache: {new_section['section_id']}")
+                
+        except Exception as e:
+            logger.error(f"Failed to add custom section to cache: {e}", exc_info=True)
+

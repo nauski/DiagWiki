@@ -70,7 +70,7 @@ class RepoUtil:
     def should_skip_directory(dir_name: str) -> bool:
         """Check if a directory should be skipped during traversal"""
         return (dir_name.startswith('.') or 
-                dir_name in ['__pycache__', 'node_modules', '.git', 'venv', 'env'])
+                dir_name in Const.DIR_SKIP_LIST)
     
     @staticmethod
     def repo_filter(root: str, allowed_extensions=None):

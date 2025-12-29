@@ -41,8 +41,8 @@ export const selectedElement = writable<{
 // Left panel state (tree view)
 export const leftPanelOpen = writable<boolean>(true);
 
-// Right panel state (explanation)
-export const rightPanelOpen = writable<boolean>(false);
+// Right panel state (explanation) - open by default
+export const rightPanelOpen = writable<boolean>(true);
 
 // Loading states
 export const isAnalyzing = writable<boolean>(false);
@@ -50,6 +50,9 @@ export const isLoadingDiagram = writable<boolean>(false);
 
 // Track which diagrams have been generated (to show loading states)
 export const generatedDiagrams = writable<Set<string>>(new Set());
+
+// Frontend cache for diagram data - prevents unnecessary backend calls
+export const diagramCache = writable<Map<string, DiagramSection>>(new Map());
 
 // Active diagram (derived from open tabs and active index)
 export const activeDiagram = derived(
@@ -84,12 +87,21 @@ export function openDiagramTab(diagram: DiagramSection) {
 		activeTabIndex.set(newTabs.length - 1);
 		return newTabs;
 	});
+	
+	// Add to cache
+	diagramCache.update(cache => {
+		const newCache = new Map(cache);
+		newCache.set(diagram.section_id, diagram);
+		return newCache;
+	});
+	
 	// Mark as generated (create new Set for reactivity)
 	generatedDiagrams.update(set => {
 		const newSet = new Set(set);
 		newSet.add(diagram.section_id);
 		return newSet;
 	});
+	
 	rightPanelOpen.set(false); // Close right panel when opening new tab
 	selectedElement.set(null);
 }

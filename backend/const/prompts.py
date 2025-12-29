@@ -632,11 +632,15 @@ CRITICAL RULES:
 3. IMPORTANT: Use descriptive, meaningful node/participant IDs that reflect their purpose
    - Good: API, Client, Database, UserService, validateInput, processRequest
    - Bad: A, B, C, Node1, Node2, temp, xyz
-4. Make the diagram COMPREHENSIVE - it must fully explain {section_title}
-5. Include 8-20 nodes/participants (be thorough, this is the main content)
-6. Add meaningful edge labels where it adds clarity
-7. Ensure the diagram is syntactically correct Mermaid code for {diagram_type}
-8. Since this is the primary content, be detailed and complete
+4. AVOID special characters in node labels that break Mermaid syntax
+   - Do NOT use: parentheses, brackets, braces, or quotes in node labels
+   - Use simple clear text labels without special characters
+   - Example: Use 'Call LLM' instead of 'Call LLM (Ollama)'
+5. Make the diagram COMPREHENSIVE - it must fully explain {section_title}
+6. Include 8-20 nodes/participants (be thorough, this is the main content)
+7. Add meaningful edge labels where it adds clarity
+8. Ensure the diagram is syntactically correct Mermaid code for {diagram_type}
+9. Since this is the primary content, be detailed and complete
 
 IMPORTANT DIAGRAM QUALITY (CRITICAL FOR DIAGRAM-FIRST WIKI):
 - Every node should represent a real component/concept from the codebase

@@ -12,6 +12,33 @@ import re
 from typing import Dict, List, Tuple, Optional
 
 
+def sanitize_mermaid_label(label: str) -> str:
+    """
+    Sanitize a label for use in Mermaid diagrams.
+    Escapes special characters that break Mermaid syntax.
+    
+    Args:
+        label: The raw label text
+        
+    Returns:
+        Sanitized label safe for Mermaid
+    """
+    if not label:
+        return label
+    
+    # Replace problematic characters with HTML entities
+    # Parentheses inside brackets break Mermaid syntax
+    label = label.replace('(', '#40;')  # HTML entity for (
+    label = label.replace(')', '#41;')  # HTML entity for )
+    label = label.replace('[', '#91;')  # HTML entity for [
+    label = label.replace(']', '#93;')  # HTML entity for ]
+    label = label.replace('{', '#123;') # HTML entity for {
+    label = label.replace('}', '#125;') # HTML entity for }
+    label = label.replace('"', '#quot;')  # HTML entity for "
+    
+    return label
+
+
 class MermaidNode:
     """Represents a node in a Mermaid diagram."""
     def __init__(self, node_id: str, label: str = None, shape: str = "rectangle"):
@@ -251,7 +278,8 @@ class MermaidDiagramParser:
         
         # Remove outer quotes if present
         label = label_str.strip().strip('"').strip("'")
-        return label
+        # Sanitize the label for safe Mermaid usage
+        return sanitize_mermaid_label(label)
     
     def _detect_shape(self, label_str: str) -> str:
         """Detect node shape from label format."""

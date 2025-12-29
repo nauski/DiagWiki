@@ -41,22 +41,22 @@
 	});
 </script>
 
-{#if $openTabs.length > 0}
-	<div class="flex items-center bg-gray-100 border-b border-gray-300">
-		<!-- Home Button -->
-		<button
-			on:click={handleGoHome}
-			class="flex-shrink-0 px-4 py-2 flex items-center gap-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 border-r border-gray-300 transition-colors"
-			title="Return to home"
-		>
-			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-			</svg>
-			<span class="text-sm font-medium">Home</span>
-		</button>
-		
-		<!-- Tabs container with overflow scroll -->
-		<div class="flex items-center overflow-x-auto flex-1">
+<div class="flex items-center bg-gray-100 border-b border-gray-300">
+	<!-- Home Button -->
+	<button
+		on:click={handleGoHome}
+		class="flex-shrink-0 px-4 py-2 flex items-center gap-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 border-r border-gray-300 transition-colors"
+		title="Return to home"
+	>
+		<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+		</svg>
+		<span class="text-sm font-medium">Home</span>
+	</button>
+	
+	<!-- Tabs container with overflow scroll -->
+	<div class="flex items-center overflow-x-auto flex-1">
+		{#if $openTabs.length > 0}
 			{#each $openTabs as tab, index}
 				<div
 					class="relative flex items-center gap-2 px-4 py-2 border-r border-gray-300 hover:bg-gray-50 transition-colors min-w-[150px] max-w-[200px] flex-shrink-0"
@@ -84,46 +84,20 @@
 					</button>
 				</div>
 			{/each}
+		{/if}
 
-			<!-- Add New Diagram Button (next to last tab) -->
-			<button
-				on:click={handleOpenQueryDialog}
-				class="flex-shrink-0 px-3 py-2 flex items-center justify-center text-blue-600 hover:bg-blue-50 border-r border-gray-300 transition-colors"
-				title="Generate custom diagram"
-			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-				</svg>
-			</button>
-		</div>
-	</div>
-{:else}
-	<div class="bg-gray-50 border-b border-gray-300 px-4 py-2 flex items-center justify-between">
-		<!-- Home Button when no tabs -->
+		<!-- Add New Diagram Button (always visible) -->
 		<button
-			on:click={handleGoHome}
-			class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-			title="Return to home"
+			on:click={handleOpenQueryDialog}
+			class="flex-shrink-0 px-3 py-2 flex items-center justify-center text-blue-600 hover:bg-blue-50 border-l border-gray-300 transition-colors"
+			title="Generate custom diagram"
 		>
 			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
 			</svg>
-			<span class="text-sm font-medium">Home</span>
 		</button>
-		<div class="flex items-center gap-4">
-			<span class="text-sm text-gray-500">No diagrams open. Select a section from the left panel.</span>
-			<button
-				on:click={handleOpenQueryDialog}
-				class="flex items-center gap-2 px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-				title="Generate custom diagram"
-			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-				</svg>
-				<span class="text-sm font-medium">New Diagram</span>
-			</button>
-		</div>
 	</div>
-{/if}
+</div>
 
+<!-- Query Dialog -->
 <QueryDialog isOpen={showQueryDialog} onClose={handleCloseQueryDialog} />

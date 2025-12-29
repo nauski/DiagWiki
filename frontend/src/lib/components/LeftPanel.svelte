@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { availableSections, currentProject, openDiagramTab, isLoadingDiagram, openTabs, generatedDiagrams, activeTabIndex } from '$lib/stores';
+	import { availableSections, currentProject, openDiagramTab, openTabs, generatedDiagrams, activeTabIndex, diagramCache } from '$lib/stores';
 	import { generateSectionDiagram } from '$lib/api';
 	import type { WikiSection } from '$lib/types';
 	import TreeNode from './TreeNode.svelte';
@@ -30,24 +30,40 @@
 			return;
 		}
 
+		// Check frontend cache first - access the Map reactively
+		const cache = $diagramCache;
+		if (cache.has(section.section_id)) {
+			const cachedDiagram = cache.get(section.section_id)!;
+			console.log('✓ Using cached diagram (no API call):', section.section_id);
+			openDiagramTab(cachedDiagram);
+			return;
+		}
+
+		// Not in cache, load from backend
+		console.log('✗ Cache miss, calling API for:', section.section_id);
 		loadingSection = section.section_id;
-		isLoadingDiagram.set(true);
 
 		try {
 			const diagram = await generateSectionDiagram($currentProject, section);
+			
+			// Cache is updated by openDiagramTab
 			openDiagramTab(diagram);
 		} catch (error) {
 			console.error('Failed to load diagram:', error);
 			alert('Failed to load diagram');
 		} finally {
 			loadingSection = null;
-			isLoadingDiagram.set(false);
 		}
 	}
 	
-	// Check if diagram is being generated in background (not yet ready)
-	$: isGenerating = (sectionId: string): boolean => {
-		return !$generatedDiagrams.has(sectionId);
+	// Check if diagram has been generated (is ready/cached)
+	$: isReady = (sectionId: string): boolean => {
+		return $generatedDiagrams.has(sectionId);
+	};
+	
+	// Check if diagram is currently being loaded by this component
+	$: isLoading = (sectionId: string): boolean => {
+		return loadingSection === sectionId;
 	};
 
 	function toggleGroup(groupName: string) {
@@ -227,27 +243,25 @@
 								{#each sections as section}
 									<button
 										on:click={() => handleSectionClick(section)}
-										disabled={loadingSection === section.section_id || isGenerating(section.section_id)}
+										disabled={isLoading(section.section_id)}
 										class="w-full text-left px-3 py-2 rounded transition-colors group relative"
 										class:bg-blue-50={isOpen(section.section_id)}
 										class:border-l-2={isOpen(section.section_id)}
 										class:border-blue-500={isOpen(section.section_id)}
-										class:hover:bg-white={!isGenerating(section.section_id)}
-										class:opacity-50={isGenerating(section.section_id)}
-										class:cursor-wait={loadingSection === section.section_id}
-										class:cursor-not-allowed={isGenerating(section.section_id) && loadingSection !== section.section_id}
+										class:hover:bg-gray-50={!isLoading(section.section_id)}
+										class:cursor-wait={isLoading(section.section_id)}
 									>
 										<div class="flex items-start gap-2">
 											<div class="flex-1 min-w-0">
 												<div class="text-sm font-medium text-gray-900 flex items-center gap-2" title="{section.section_title}">
 													<span class="truncate">{section.section_title}</span>
-													{#if isOpen(section.section_id)}
-														<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 flex-shrink-0">
-															Open
+													{#if isLoading(section.section_id)}
+														<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 flex-shrink-0">
+															Loading...
 														</span>
-													{:else if isGenerating(section.section_id)}
+													{:else if !isReady(section.section_id)}
 														<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 flex-shrink-0">
-															Generating...
+															Not cached
 														</span>
 													{/if}
 												</div>
@@ -259,13 +273,9 @@
 														</svg>
 														Loading...
 													</div>
-												{:else if isGenerating(section.section_id)}
-													<div class="text-xs text-gray-500 mt-1 flex items-center gap-1">
-														<svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-															<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-															<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-														</svg>
-														Queued...
+												{:else if !isReady(section.section_id)}
+													<div class="text-xs text-gray-500 mt-1">
+														Not cached - click to generate
 													</div>
 												{/if}
 											</div>
