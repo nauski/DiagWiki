@@ -8,16 +8,109 @@
 	let error = '';
 	let isExpanded = true;
 	let isExecuting = false;
+	let streamingAnswer = '';
+	let isStreaming = false;
+	let ws: WebSocket | null = null;
 
 	async function handleSubmit() {
 		if (!query.trim() || !$currentProject || isQuerying) return;
 
 		isQuerying = true;
+		isStreaming = true;
 		error = '';
 		result = null;
+		streamingAnswer = '';
 
 		try {
-			const response = await queryWikiProblem($currentProject, query);
+			// Connect to WebSocket
+			ws = new WebSocket('ws://localhost:8001/ws/query');
+			
+			let connectionTimeout = setTimeout(() => {
+				if (ws && ws.readyState !== WebSocket.OPEN) {
+					console.log('WebSocket connection timeout, falling back to REST API');
+					ws.close();
+					fallbackToRegularQuery();
+				}
+			}, 3000); // 3 second timeout
+			
+			ws.onopen = () => {
+				console.log('WebSocket connected successfully');
+				clearTimeout(connectionTimeout);
+				// Send query
+				if (ws && $currentProject) {
+					ws.send(JSON.stringify({
+						root_path: $currentProject,
+						prompt: query,
+						wiki_items: null
+					}));
+				}
+			};
+			
+			ws.onmessage = (event) => {
+				try {
+					const data = JSON.parse(event.data);
+					
+					if (data.error) {
+						error = data.error;
+						isQuerying = false;
+						isStreaming = false;
+						ws?.close();
+						return;
+					}
+					
+					if (data.type === 'metadata') {
+						// Store metadata
+						result = { intent: data.intent, status: data.status };
+					} else if (data.type === 'chunk') {
+						// Append streaming content
+						streamingAnswer += data.content;
+					} else if (data.type === 'complete') {
+						// Final result
+						result = data.result;
+						isStreaming = false;
+						isQuerying = false;
+						isExpanded = true;
+						ws?.close();
+					}
+				} catch (e) {
+					console.error('Error parsing WebSocket message:', e);
+				}
+			};
+			
+			ws.onerror = (err) => {
+				console.error('WebSocket error:', err);
+				clearTimeout(connectionTimeout);
+				if (isQuerying) {
+					console.log('WebSocket error, falling back to REST API');
+					fallbackToRegularQuery();
+				}
+			};
+			
+			ws.onclose = (event) => {
+				console.log('WebSocket closed:', event.code, event.reason);
+				clearTimeout(connectionTimeout);
+				ws = null;
+				// If connection closed before query completed, fallback
+				if (isQuerying && !result) {
+					console.log('WebSocket closed prematurely, falling back to REST API');
+					fallbackToRegularQuery();
+				}
+			};
+		} catch (err) {
+			console.error('Failed to create WebSocket:', err);
+			fallbackToRegularQuery();
+		}
+	}
+	
+	async function fallbackToRegularQuery() {
+		if (!isQuerying) return; // Already handled
+		
+		console.log('Using REST API fallback');
+		streamingAnswer = '';
+		isStreaming = false;
+		
+		try {
+			const response = await queryWikiProblem($currentProject!, query);
 			result = response;
 			isExpanded = true;
 		} catch (err) {
@@ -208,7 +301,11 @@
 			{#if isExpanded}
 				<div class="p-3 overflow-y-auto" style="max-height: calc(30vh - 40px);">
 					{#if result.intent === 'question'}
-						<p class="text-sm text-gray-900 whitespace-pre-wrap">{formatPlainText(result.answer || '')}</p>
+						{#if isStreaming}
+							<p class="text-sm text-gray-900 whitespace-pre-wrap">{streamingAnswer}<span class="animate-pulse">▋</span></p>
+						{:else}
+							<p class="text-sm text-gray-900 whitespace-pre-wrap">{formatPlainText(streamingAnswer || result.answer || '')}</p>
+						{/if}
 					{:else if result.intent === 'modification'}
 						<p class="text-sm text-gray-900 whitespace-pre-wrap">{formatPlan(result)}</p>
 						<div class="mt-3 pt-3 border-t border-blue-200">

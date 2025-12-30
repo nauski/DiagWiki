@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentProject, leftPanelOpen, rightPanelOpen, activeDiagram } from '$lib/stores';
+	import { currentProject, leftPanelOpen, rightPanelOpen, activeDiagram, identifiedSections } from '$lib/stores';
 	import FolderPicker from '$lib/components/FolderPicker.svelte';
 	import DiagramTabs from '$lib/components/DiagramTabs.svelte';
 	import LeftPanel from '$lib/components/LeftPanel.svelte';
@@ -63,9 +63,14 @@
 				<div class="flex-1 overflow-hidden">
 					{#if $activeDiagram}
 						<DiagramViewer diagram={$activeDiagram} />
-					{:else}
-						<div class="h-full flex items-center justify-center text-gray-500">
-							<p>Select a diagram section from the left panel</p>
+					{:else if ($identifiedSections.length === 0)}
+						<div class="h-full flex flex-col items-center justify-center text-gray-500">
+							<!-- Large Loading Spinner -->
+							<svg class="animate-spin h-16 w-16 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+							<p class="text-lg">Analyzing project...</p>
 						</div>
 					{/if}
 				</div>
