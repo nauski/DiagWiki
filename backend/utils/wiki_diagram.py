@@ -88,7 +88,7 @@ class WikiDiagramGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=8,
+                    top_k=20,
                     use_reranking=True
                 )
                 rag_results.append({
@@ -333,7 +333,7 @@ Return ONLY the title text, nothing else."""
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=8,
+                    top_k=20,
                     use_reranking=True
                 )
                 rag_results.append({

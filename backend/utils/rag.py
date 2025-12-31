@@ -281,7 +281,7 @@ FORMATTING RULES:
         try:
             # FAISS retriever configuration
             retriever_config = {
-                "top_k": 5,
+                "top_k": 20,
                 "dimensions": 768,  # nomic-embed-text dimension
                 "metric": "cosine"
             }
@@ -439,7 +439,7 @@ FORMATTING RULES:
         
         return [idx for idx, _ in combined_scores]
 
-    def call(self, query: str, top_k: int = 5, use_reranking: bool = True) -> Tuple[RAGAnswer, List[Document]]:
+    def call(self, query: str, top_k: int = 20, use_reranking: bool = True) -> Tuple[RAGAnswer, List[Document]]:
         """
         Process a query using RAG with optional keyword-based re-ranking.
 
@@ -506,6 +506,6 @@ FORMATTING RULES:
             )
             return error_response, []
 
-    def __call__(self, query: str, top_k: int = 5, use_reranking: bool = True) -> Tuple[RAGAnswer, List[Document]]:
+    def __call__(self, query: str, top_k: int = 20, use_reranking: bool = True) -> Tuple[RAGAnswer, List[Document]]:
         """Shorthand for call()"""
         return self.call(query, top_k, use_reranking)

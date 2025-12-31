@@ -84,9 +84,7 @@ class MermaidDiagramParser:
         # Detect diagram type
         if lines:
             first_line = lines[0].strip().lower()
-            if first_line.startswith('graph'):
-                self.diagram_type = 'graph'
-            elif first_line.startswith('flowchart'):
+            if first_line.startswith('flowchart'):
                 self.diagram_type = 'flowchart'
             elif first_line.startswith('sequencediagram'):
                 self.diagram_type = 'sequence'
@@ -98,7 +96,7 @@ class MermaidDiagramParser:
                 self.diagram_type = 'er'
         
         # Parse based on diagram type
-        if self.diagram_type in ['graph', 'flowchart']:
+        if self.diagram_type == 'flowchart':
             self._parse_graph(lines[1:])  # Skip first line (graph TD/LR)
         elif self.diagram_type == 'sequence':
             self._parse_sequence(lines[1:])
@@ -353,7 +351,7 @@ def validate_mermaid_syntax(mermaid_code: str) -> Tuple[bool, str]:
             return False, "Empty diagram"
         
         first_line = lines[0].strip().lower()
-        valid_types = ['graph', 'flowchart', 'sequencediagram', 'classdiagram', 
+        valid_types = ['flowchart', 'sequencediagram', 'classdiagram', 
                       'statediagram', 'erdiagram', 'gantt', 'pie', 'journey']
         
         if not any(first_line.startswith(t) for t in valid_types):

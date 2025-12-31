@@ -77,7 +77,7 @@ class WikiGenerator:
             self.wiki_rag_query = WikiRAGQuery(self.cache.wiki_db_path, self.rag)
             self.diagram_generator = WikiDiagramGenerator(self.root_path, self.cache, self.rag)
     
-    def query_wiki_rag(self, query: str, top_k: int = 5) -> Dict:
+    def query_wiki_rag(self, query: str, top_k: int = 20) -> Dict:
         """
         Query both wiki and codebase RAG for comprehensive answers.
         Delegates to WikiRAGQuery module.
@@ -141,7 +141,7 @@ class WikiGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=5,
+                    top_k=20,
                     use_reranking=True
                 )
                 rag_insights.append({
@@ -263,7 +263,7 @@ class WikiGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=8,
+                    top_k=20,
                     use_reranking=True
                 )
                 rag_results.append({
@@ -289,7 +289,7 @@ class WikiGenerator:
         
         # Load explicit files
         file_contents = []
-        for file_path in relevant_files[:5]:
+        for file_path in relevant_files[:20]:
             full_path = os.path.join(self.root_path, file_path) if not os.path.isabs(file_path) else file_path
             if os.path.exists(full_path) and os.path.isfile(full_path):
                 try:
@@ -462,13 +462,13 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=user_prompt,
-                top_k=5,
+                top_k=20,
                 use_reranking=True
             )
             
             codebase_context = "\n\n".join([
                 f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:500]}"
-                for doc in codebase_docs[:5]
+                for doc in codebase_docs[:20]
             ])
         except Exception as e:
             logger.warning(f"Could not query codebase: {e}")
@@ -580,13 +580,13 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=prompt,
-                top_k=8,
+                top_k=20,
                 use_reranking=True
             )
             
             codebase_context = "\n\n".join([
                 f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:800]}"
-                for doc in codebase_docs[:8]
+                for doc in codebase_docs[:20]
             ])
         except Exception as e:
             logger.warning(f"Could not query codebase: {e}")
@@ -749,13 +749,13 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=f"{existing_content.get('section_title', '')} {modification_prompt}",
-                top_k=8,
+                top_k=20,
                 use_reranking=True
             )
             
             codebase_context = "\n\n".join([
                 f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:800]}"
-                for doc in codebase_docs[:8]
+                for doc in codebase_docs[:20]
             ])
         except Exception as e:
             logger.warning(f"Could not query codebase: {e}")

@@ -125,8 +125,8 @@ class OllamaDocumentProcessor(DataComponent):
     Process documents for Ollama embeddings by processing one document at a time.
     Adalflow Ollama Client does not support batch embedding, so we need to process each document individually.
     """
-    # Maximum token count for embedding model (nomic-embed-text context is 8192)
-    MAX_EMBEDDING_TOKENS = 8000  # Leave some buffer
+    # Maximum token count for embedding model
+    MAX_EMBEDDING_TOKENS = 8000
     
     def __init__(self, embedder: adal.Embedder) -> None:
         super().__init__()
@@ -146,6 +146,8 @@ class OllamaDocumentProcessor(DataComponent):
                 # Check token count before attempting to embed
                 token_count = RepoUtil.token_count(doc.text)
                 file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
+                
+                logger.debug(f"Processing '{file_path}': {token_count} tokens, {len(doc.text)} chars")
                 
                 if token_count > self.MAX_EMBEDDING_TOKENS:
                     logger.warning(f"Document '{file_path}' has {token_count} tokens which exceeds embedding model context limit ({self.MAX_EMBEDDING_TOKENS}), skipping")
@@ -174,7 +176,18 @@ class OllamaDocumentProcessor(DataComponent):
                     logger.warning(f"Failed to get embedding for document '{file_path}', skipping")
             except Exception as e:
                 file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
-                logger.error(f"Error processing document '{file_path}': {e}, skipping")
+                error_msg = str(e)
+                
+                # Check if it's a context length error
+                if "context length" in error_msg.lower() or "input length" in error_msg.lower():
+                    actual_token_count = RepoUtil.token_count(doc.text)
+                    logger.error(f"Context length error for '{file_path}': {error_msg}")
+                    logger.error(f"  - Actual token count: {actual_token_count}")
+                    logger.error(f"  - Text length: {len(doc.text)} chars")
+                    logger.error(f"  - First 200 chars: {doc.text[:200]}...")
+                    skipped_large_docs += 1
+                else:
+                    logger.error(f"Error processing document '{file_path}': {e}, skipping")
 
         if skipped_large_docs > 0:
             logger.info(f"Skipped {skipped_large_docs} documents that exceeded token limit ({self.MAX_EMBEDDING_TOKENS} tokens)")

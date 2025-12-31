@@ -35,7 +35,7 @@ DIAGRAM_SECTIONS_SCHEMA = {
                     },
                     "diagram_type": {
                         "type": "string",
-                        "enum": ["flowchart", "sequence", "class", "graph", "stateDiagram", "erDiagram"],
+                        "enum": ["flowchart", "sequence", "class", "stateDiagram", "erDiagram"],
                         "description": "Type of Mermaid diagram"
                     },
                     "key_concepts": {
@@ -324,7 +324,7 @@ Based on the RAG-retrieved context and source code snippets above:
 
 3. **Mermaid Diagrams:**
    - EXTENSIVELY use Mermaid diagrams (flowchart TD, sequenceDiagram, classDiagram, etc.)
-   - All diagrams MUST use vertical orientation (graph TD, not LR)
+   - All diagrams MUST use vertical orientation
    - For sequence diagrams:
      * Define participants at beginning
      * Use ->> for solid arrow (requests/calls)
@@ -478,7 +478,7 @@ Return your analysis in the following JSON format:
       "section_id": "unique-identifier",
       "section_title": "Clear, concise title",
       "section_description": "What this section explains, using SPECIFIC component names from the codebase (2-3 sentences)",
-      "diagram_type": "flowchart|sequence|class|graph|stateDiagram|erDiagram",
+      "diagram_type": "flowchart|sequence|class|stateDiagram|erDiagram",
       "key_concepts": ["concept1", "concept2", "concept3"],
       "importance": "high|medium|low"
     }}
@@ -531,7 +531,8 @@ def build_single_diagram_prompt(
 - Start with entry points, show decision nodes, end with outcomes
 - Use rectangles for processes, diamonds for decisions, rounded for start/end
 - Keep node labels concise (3-5 words max)
-- Show the logical flow from top to bottom""",
+- Every node must represent a real component/concept from the codebase, no vague concepts or placeholders
+- Can use subgraphs to group related nodes if this adds clarity""",
         
         "sequence": """
 - MUST start with: sequenceDiagram
@@ -557,14 +558,6 @@ def build_single_diagram_prompt(
 - Keep class definitions focused on important members
 - Show interfaces and abstract classes clearly""",
         
-        "graph": """
-- MUST start with: graph TD (top-down) or graph LR (left-right)
-- Use TD orientation for hierarchies
-- Use LR for linear flows only if needed
-- Show clear relationships between nodes
-- Use different node shapes to indicate different types
-- Keep the layout clean and readable""",
-        
         "stateDiagram": """
 - MUST start with: stateDiagram-v2
 - Show all important states
@@ -587,13 +580,12 @@ def build_single_diagram_prompt(
         "flowchart": "flowchart TD",
         "sequence": "sequenceDiagram",
         "class": "classDiagram",
-        "graph": "graph TD",
         "stateDiagram": "stateDiagram-v2",
         "erDiagram": "erDiagram"
     }
     
     specific_instructions = diagram_instructions.get(diagram_type, diagram_instructions["flowchart"])
-    required_syntax = diagram_syntax.get(diagram_type, "flowchart TD")
+    required_syntax = diagram_syntax.get(diagram_type, "flowchart")
     
     prompt = f"""You are an expert at creating clear, informative Mermaid diagrams for a DIAGRAM-FIRST WIKI.
 
@@ -616,29 +608,23 @@ Your task is to create a COMPREHENSIVE Mermaid {diagram_type} diagram that FULLY
 This is not just a visual aid - it's the main content!
 
 DIAGRAM SYNTAX REQUIREMENT:
-⚠️ CRITICAL: Your mermaid_code MUST start with: {required_syntax}
-   (NOT "graph TD" if diagram_type is "{diagram_type}")
+CRITICAL: Your mermaid_code MUST start with: {required_syntax}
 
 DIAGRAM REQUIREMENTS:
 {specific_instructions}
 
 CRITICAL RULES:
 1. Node IDs must be simple alphanumeric (e.g., API, Client, UserService, validateInput)
-2. SYNTAX VARIES BY DIAGRAM TYPE:
-   - Flowcharts/Graphs: Use Node[Label] or Node["Label"] syntax
-   - Sequence diagrams: Use "participant Name as Label" (NOT Name[Label])
-   - Class diagrams: Use "class Name" with methods/properties
-   - State diagrams: Use state names directly
-3. IMPORTANT: Use descriptive, meaningful node/participant IDs that reflect their purpose
+2. IMPORTANT: Use descriptive, meaningful node/participant IDs that reflect their purpose
    - Good: API, Client, Database, UserService, validateInput, processRequest
    - Bad: A, B, C, Node1, Node2, temp, xyz
-4. AVOID special characters in node labels that break Mermaid syntax
+3. AVOID special characters in node labels that break Mermaid syntax
    - Especially, Do NOT use: parentheses, brackets, braces, or quotes in node labels
-   - Example: A --> D[get(key)], the get(key) will make the diagram not compilable
-5. Make the diagram COMPREHENSIVE - it must fully explain {section_title}
-7. Add meaningful edge labels where it adds clarity
-8. Ensure the diagram is syntactically correct Mermaid code for {diagram_type}
-9. Since this is the primary content, be detailed and complete
+   - Example: A --> D[get(key)] is invalid, the get(key) will make the diagram compilation fail
+4. Make the diagram COMPREHENSIVE - it must fully explain {section_title}
+5. Add meaningful edge labels where it adds clarity
+6. Ensure the diagram is syntactically correct Mermaid code for {diagram_type}
+7. Since this is the primary content, be detailed and complete
 
 IMPORTANT DIAGRAM QUALITY (CRITICAL FOR DIAGRAM-FIRST WIKI):
 - Every node should represent a real component/concept from the codebase
@@ -646,7 +632,7 @@ IMPORTANT DIAGRAM QUALITY (CRITICAL FOR DIAGRAM-FIRST WIKI):
 - Use the RAG context and source snippets as your primary source of truth
 - The diagram MUST be comprehensive enough to understand the section WITHOUT additional text
 - Think: "Can someone understand this topic fully just from this diagram and explanations?"
-- The node and edge explanations will be displayed interactively when clicked
+- Think: "In addition to structure design, what node styles, edge styles, and layout choices add clarity?"
 
 Return your response in the following JSON format:
 

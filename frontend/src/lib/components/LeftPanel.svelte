@@ -13,7 +13,7 @@
 	};
 
 	let viewMode: ViewMode = 'diagrams';
-	let expandedGroups: Set<string> = new Set(['graph', 'flowchart', 'sequence', 'class', 'stateDiagram', 'erDiagram']);
+	let expandedGroups: Set<string> = new Set(['flowchart', 'sequence', 'class', 'stateDiagram', 'erDiagram']);
 	let expandedFolders: Set<string> = new Set(); // For folder tree view
 	let folderTree: FolderNode | null = null;
 	let loadingFolderTree = false;

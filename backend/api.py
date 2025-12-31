@@ -238,7 +238,7 @@ async def init_wiki(
 async def query_wiki(
     root_path: str = Query(..., description="Root path to the wiki folder"),
     query: str = Query(..., description="Question to ask about the codebase"),
-    top_k: int = Query(5, description="Number of documents to retrieve"),
+    top_k: int = Query(20, description="Number of documents to retrieve"),
     use_reranking: bool = Query(True, description="Whether to use hybrid retrieval (semantic + BM25)"),
     include_wiki: bool = Query(False, description="Whether to include generated wiki content in the search")
 ):
