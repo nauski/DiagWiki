@@ -125,8 +125,8 @@ class OllamaDocumentProcessor(DataComponent):
     Process documents for Ollama embeddings by processing one document at a time.
     Adalflow Ollama Client does not support batch embedding, so we need to process each document individually.
     """
-    # Maximum token count for embedding model
-    MAX_EMBEDDING_TOKENS = 8000
+    # Maximum token count for embedding model (nomic-embed-text has 8192 limit, but use 6000 for safety)
+    MAX_EMBEDDING_TOKENS = 6000
     
     def __init__(self, embedder: adal.Embedder) -> None:
         super().__init__()

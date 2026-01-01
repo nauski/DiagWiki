@@ -125,13 +125,17 @@ class RepoUtil:
             token_count = RepoUtil.token_count(content)
             
             # Handle large files
-            if token_count > RepoUtil.MAX_TOKEN_LIMIT * 10:
+            if token_count > RepoUtil.MAX_TOKEN_LIMIT and token_count < RepoUtil.MAX_TOKEN_LIMIT * 10:
                 if truncate_large:
                     logger.warning(f"File {full_path} is too large with {token_count} tokens, cutting off content that exceeds limit.")
                     content = content[:RepoUtil.MAX_TOKEN_LIMIT * 10]
                     token_count = RepoUtil.MAX_TOKEN_LIMIT * 10
                 else:
                     logger.warning(f"File {full_path} is very large with {token_count} tokens")
+                    return None
+            elif token_count >= RepoUtil.MAX_TOKEN_LIMIT * 10:
+                logger.warning(f"File {full_path} is excessively large with {token_count} tokens, skipping.")
+                return None
             
             # Calculate paths and metadata
             filename = os.path.basename(full_path)
@@ -151,19 +155,7 @@ class RepoUtil:
                 meta_data["file_path"] = relative_path
                 meta_data["real_path"] = relative_path
             
-            # Add rich semantic context that will survive text splitting
-            # Include file type and path to help embedding model understand context
-            file_type_desc = {
-                '.svelte': 'Svelte frontend component',
-                '.ts': 'TypeScript code',
-                '.py': 'Python backend code',
-                '.md': 'Documentation',
-                '.json': 'Configuration',
-                '.yml': 'Configuration',
-            }.get(ext, 'Source code')
-            
-            context_header = f"[{file_type_desc}: {relative_path}]\n\n"
-            return Document(text=context_header + content, meta_data=meta_data)
+            return Document(text=f'File_path: {relative_path}\ncontent: {content}', meta_data=meta_data)
             
         except Exception as e:
             logger.error(f"Error reading file {full_path}: {e}")

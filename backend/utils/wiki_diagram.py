@@ -347,10 +347,28 @@ Return ONLY the title text, nothing else."""
                 logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
         
         # Build RAG context
-        rag_context = "\n\n".join([
-            f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
-            for r in rag_results
-        ])
+        MAX_RAG_CONTEXT_CHARS = 10**9
+        
+        rag_context_parts = []
+        current_length = 0
+        
+        for r in rag_results:
+            part = f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
+            part_length = len(part)
+            
+            if current_length + part_length > MAX_RAG_CONTEXT_CHARS:
+                # Truncate last part to fit
+                remaining = MAX_RAG_CONTEXT_CHARS - current_length
+                if remaining > 100:  # Only add if meaningful space left
+                    truncated = part[:remaining] + "\n\n[... truncated for size limits ...]"
+                    rag_context_parts.append(truncated)
+                break
+            
+            rag_context_parts.append(part)
+            current_length += part_length + 2  # +2 for "\n\n" separator
+        
+        rag_context = "\n\n".join(rag_context_parts)
+        logger.info(f"RAG context size: {len(rag_context)} chars (~{len(rag_context)//4} tokens)")
         
         # Deduplicate documents for retrieval
         seen_paths = {}
@@ -361,15 +379,34 @@ Return ONLY the title text, nothing else."""
                 seen_paths[file_path] = doc
                 unique_docs.append(doc)
         
+        # Also limit retrieved sources to prevent overflow
+        MAX_SOURCE_CHARS_EACH = 600  # Reduced from 800
+        MAX_SOURCES = 15
+        
         retrieved_sources = "\n\n".join([
-            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:800]}"
-            for i, doc in enumerate(unique_docs[:15])
+            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:MAX_SOURCE_CHARS_EACH]}"
+            for i, doc in enumerate(unique_docs[:MAX_SOURCES])
         ])
+        logger.info(f"Retrieved sources size: {len(retrieved_sources)} chars (~{len(retrieved_sources)//4} tokens)")
         
         return rag_context, retrieved_sources, all_retrieved_docs
     
     def _generate_diagram_with_llm(self, diagram_prompt: str) -> str:
-        """Generate diagram using LLM."""
+        """Generate diagram using LLM with size validation."""
+        # Validate prompt size BEFORE calling LLM
+        prompt_chars = len(diagram_prompt)
+        estimated_tokens = prompt_chars // 4
+        context_window = 16384
+        usage_percentage = (estimated_tokens / context_window) * 100
+        
+        logger.info(f"Prompt size: {prompt_chars:,} chars (~{estimated_tokens:,} tokens, {usage_percentage:.1f}% of context)")
+        
+        if usage_percentage > 90:
+            logger.warning(f"⚠️  Prompt exceeds 90% of context window! This may cause hanging.")
+            logger.warning(f"⚠️  Consider reducing MAX_RAG_CONTEXT_CHARS if this takes >60 seconds.")
+        elif usage_percentage > 75:
+            logger.warning(f"⚠️  Prompt exceeds 75% of context window. Processing may be slow.")
+        
         model = OllamaClient()
         model_kwargs = {
             "model": Const.GENERATION_MODEL,

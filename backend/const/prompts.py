@@ -532,7 +532,9 @@ def build_single_diagram_prompt(
 - Use rectangles for processes, diamonds for decisions, rounded for start/end
 - Keep node labels concise (3-5 words max)
 - Every node must represent a real component/concept from the codebase, no vague concepts or placeholders
-- Can use subgraphs to group related nodes if this adds clarity""",
+- Can use subgraphs to group related nodes if this adds clarity
+- Do NOT use: parentheses, brackets, braces, or quotes in node labels
+- Example: A --> D[get(key)] is invalid, the get(key) will make the diagram compilation fail""",
         
         "sequence": """
 - MUST start with: sequenceDiagram
@@ -557,8 +559,8 @@ def build_single_diagram_prompt(
 - Use inheritance (--|>) and composition (--o) correctly
 - Keep class definitions focused on important members
 - Show interfaces and abstract classes clearly
-- If you want to add notes, they must be single-line using: note "text here"
-- Better approach: Put explanatory information in node_explanations and edge_explanations instead of notes""",
+- If you want to add notes, they must be single-line using: note for MyClass \"This is a note for a class\"
+- DON'T use multi-line notes as they break Mermaid syntax!""",
         
         "stateDiagram": """
 - MUST start with: stateDiagram-v2
@@ -621,8 +623,6 @@ CRITICAL RULES:
    - Good: API, Client, Database, UserService, validateInput, processRequest
    - Bad: A, B, C, Node1, Node2, temp, xyz
 3. AVOID special characters in node labels that break Mermaid syntax
-   - Especially, Do NOT use: parentheses, brackets, braces, or quotes in node labels
-   - Example: A --> D[get(key)] is invalid, the get(key) will make the diagram compilation fail
 4. Make the diagram COMPREHENSIVE - it must fully explain {section_title}
 5. Add meaningful edge labels where it adds clarity
 6. Ensure the diagram is syntactically correct Mermaid code for {diagram_type}
