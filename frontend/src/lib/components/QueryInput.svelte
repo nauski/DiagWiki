@@ -76,17 +76,20 @@
 						const diagram = await response.json();
 						
 						// Add new section to identifiedSections
-						identifiedSections.update(sections => {
-							if (!sections.some(s => s.section_id === diagram.section_id)) {
-								return [...sections, {
+						identifiedSections.update(map => {
+							if (!$currentProject) return map;
+							const newMap = new Map(map);
+							const projectSections = newMap.get($currentProject) || [];
+							if (!projectSections.some(s => s.section_id === diagram.section_id)) {
+								newMap.set($currentProject, [...projectSections, {
 									section_id: diagram.section_id,
 									section_title: diagram.section_title,
 									section_description: diagram.section_description,
 									diagram_type: diagram.diagram?.diagram_type || 'flowchart',
 									key_concepts: []
-								}];
+								}]);
 							}
-							return sections;
+							return newMap;
 						});
 					}
 				} catch (err) {

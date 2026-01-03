@@ -78,7 +78,8 @@ class Const:
     EMBEDDING_CONFIG = {
         "client": TimeoutOllamaClient(timeout=30.0),  # Embeddings are fast, shorter timeout
         "model_kwargs": {
-        "model": "nomic-embed-text"
+            "model": "nomic-embed-text",
+            "keep_alive": "10m"  # Keep embedding model loaded
         }
     }
 

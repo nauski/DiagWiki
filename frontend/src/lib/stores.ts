@@ -22,8 +22,8 @@ projectHistory.subscribe((value) => {
 	}
 });
 
-// Available diagram sections from analysis
-export const identifiedSections = writable<WikiSection[]>([]);
+// Available diagram sections from analysis - keyed by project path
+export const identifiedSections = writable<Map<string, WikiSection[]>>(new Map());
 
 export const generateRequestSent = writable<Map<string, Set<string>>>(new Map());
 export const availableSections = writable<Map<string, Set<WikiSection>>>(new Map());
@@ -91,13 +91,19 @@ export const activeDiagram = derived(
 export function addToHistory(path: string) {
 	projectHistory.update((history) => {
 		const existing = history.find((h) => h.path === path);
+		// Get diagram count from identifiedSections map
+		const sections = get(identifiedSections).get(path);
+		const diagramCount = sections ? sections.length : undefined;
 		if (existing) {
 			existing.lastAccessed = Date.now();
+			if (diagramCount !== undefined) {
+				existing.diagrams = Array(diagramCount).fill(''); // Just track count
+			}
 			return [...history.filter((h) => h.path !== path), existing].sort(
 				(a, b) => b.lastAccessed - a.lastAccessed
 			);
 		}
-		return [{ path, lastAccessed: Date.now() }, ...history].slice(0, 10); // Keep last 10
+		return [{ path, lastAccessed: Date.now(), diagrams: diagramCount ? Array(diagramCount).fill('') : [] }, ...history].slice(0, 10); // Keep last 10
 	});
 }
 

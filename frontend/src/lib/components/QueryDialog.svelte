@@ -111,7 +111,8 @@
 		let section: WikiSection | undefined;
 		
 		if (selectedSectionId) {
-			section = $identifiedSections.find(s => s.section_id === selectedSectionId);
+			const projectSections = $currentProject ? $identifiedSections.get($currentProject) : [];
+			section = projectSections?.find(s => s.section_id === selectedSectionId);
 		}
 		
 		if (!section) {
@@ -152,15 +153,18 @@
 			
 			// Add the custom section to identifiedSections if it's new
 			if (sectionToGenerate.section_id.startsWith('custom_')) {
-				identifiedSections.update(sections => {
-					if (!sections.some(s => s.section_id === sectionToGenerate.section_id)) {
+				identifiedSections.update(map => {
+					if (!$currentProject) return map;
+					const newMap = new Map(map);
+					const projectSections = newMap.get($currentProject) || [];
+					if (!projectSections.some(s => s.section_id === sectionToGenerate.section_id)) {
 						const updatedSection = {
 							...sectionToGenerate,
 							section_title: diagram.section_title || sectionToGenerate.section_title
 						};
-						return [...sections, updatedSection];
+						newMap.set($currentProject, [...projectSections, updatedSection]);
 					}
-					return sections;
+					return newMap;
 				});
 			}
 			

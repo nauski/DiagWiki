@@ -125,7 +125,10 @@ FORMATTING RULES:
                 "contexts": None,
             },
             model_client=Const.EMBEDDING_CONFIG["client"],
-            model_kwargs={"model": self.model},
+            model_kwargs={
+                "model": self.model,
+                "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
+            },
             output_processors=data_parser,
         )
 
@@ -492,6 +495,16 @@ FORMATTING RULES:
                 answer = response.data if hasattr(response, 'data') else response
             else:
                 answer = response
+            
+            # Validate answer is not None
+            if answer is None or not isinstance(answer, RAGAnswer):
+                logger.warning(f"Invalid answer format, using raw response")
+                # Try to extract answer from raw text
+                raw_text = str(response.raw_response if hasattr(response, 'raw_response') else response)
+                answer = RAGAnswer(
+                    rationale="Raw response from model (parsing failed)",
+                    answer=raw_text
+                )
 
             logger.info(f"Generated answer for query: {query[:50]}...")
             return answer, retrieved_docs

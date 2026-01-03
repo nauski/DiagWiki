@@ -6,6 +6,36 @@
 
 	let folderPath = '';
 	let error = '';
+	
+	// Handle file picker (picks a directory)
+	async function handleFilePicker() {
+		try {
+			const input = document.createElement('input');
+			input.type = 'file';
+			(input as any).webkitdirectory = true;
+			(input as any).directory = true;
+			input.multiple = true;
+			
+			input.onchange = (e: Event) => {
+				const target = e.target as HTMLInputElement;
+				if (target.files && target.files.length > 0) {
+					const file = target.files[0];
+					// Extract directory path from the file path
+					const pathParts = file.webkitRelativePath.split('/');
+					if (pathParts.length > 1) {
+						// For security, we can't get the full path, but we can show the folder name
+						const folderName = pathParts[0];
+						error = `Due to security restrictions, browsers cannot reveal the full path. Selected folder: "${folderName}". Please enter the full path manually above.`;
+					}
+				}
+			};
+			
+			input.click();
+		} catch (err) {
+			console.error('File picker error:', err);
+			error = 'File picker not supported in this browser. Please enter path manually.';
+		}
+	}
 
 	async function handleAnalyze() {
 		if (!folderPath.trim()) {
@@ -18,10 +48,16 @@
 
 		try {
 			currentProject.set(folderPath);
-			addToHistory(folderPath);
 			
 			const result = await identifyDiagramSections(folderPath);
-			identifiedSections.set(result.sections);
+			// Store sections in map keyed by project path
+			identifiedSections.update(map => {
+				const newMap = new Map(map);
+				newMap.set(folderPath, result.sections);
+				return newMap;
+			});
+			
+			addToHistory(folderPath);
 			
 			// Stop analyzing state
 			isAnalyzing.set(false);
@@ -38,7 +74,11 @@
 			isAnalyzing.set(false);
 			// Reset currentProject on error to go back to FolderPicker
 			currentProject.set(null);
-			identifiedSections.set([]);
+			identifiedSections.update(map => {
+				const newMap = new Map(map);
+				newMap.delete(folderPath);
+				return newMap;
+			});
 		}
 	}
 
@@ -177,50 +217,77 @@
 	}
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
-	<div class="w-full max-w-2xl">
-		<h1 class="text-4xl font-bold text-gray-900 mb-2">DiagWiki</h1>
-		<p class="text-gray-600 mb-8">Generate interactive diagrams from your codebase</p>
+<div class="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
+	<div class="w-full max-w-6xl">
+		<div class="text-center mb-12">
+			<h1 class="text-5xl font-bold text-gray-900 mb-3">DiagWiki</h1>
+			<p class="text-xl text-gray-600">Generate interactive diagrams from your codebase</p>
+		</div>
 
-		<!-- Folder Input -->
-		<div class="bg-white rounded-lg shadow-sm p-6 mb-6">
-			<label for="folder" class="block text-sm font-medium text-gray-700 mb-2">
+		<!-- Folder Input Card -->
+		<div class="bg-white rounded-xl shadow-lg p-8 mb-8">
+			<label for="folder" class="block text-sm font-semibold text-gray-700 mb-3">
 				Project Folder Path
 			</label>
-			<div class="flex gap-2">
+			<div class="flex gap-3 mb-3">
 				<input
 					id="folder"
 					type="text"
 					bind:value={folderPath}
 					placeholder="/path/to/your/project"
-					class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+					class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
 					on:keydown={(e) => e.key === 'Enter' && handleAnalyze()}
 				/>
 				<button
+					on:click={handleFilePicker}
+					class="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors border border-gray-300"
+					title="Browse for folder"
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+					</svg>
+				</button>
+				<button
 					on:click={handleAnalyze}
 					disabled={$isAnalyzing}
-					class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+					class="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
 				>
 					{$isAnalyzing ? 'Analyzing...' : 'Analyze'}
 				</button>
 			</div>
-			{#if error}
-				<p class="text-red-600 text-sm mt-2">{error}</p>
-			{/if}
+			
+
 		</div>
 
 		<!-- Recent Projects -->
 		{#if $projectHistory.length > 0}
-			<div class="bg-white rounded-lg shadow-sm p-6">
-				<h2 class="text-lg font-semibold text-gray-900 mb-4">Recent Projects</h2>
-				<div class="space-y-2">
+			<div>
+				<h2 class="text-2xl font-semibold text-gray-900 mb-6">Recent Projects</h2>
+				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 					{#each $projectHistory as project}
 						<button
 							on:click={() => handleSelectHistory(project.path)}
-							class="w-full text-left px-4 py-3 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+							class="bg-white rounded-xl shadow-md p-6 hover:shadow-xl transition-all duration-200 text-left group border-2 border-transparent hover:border-blue-300"
 						>
-							<div class="font-medium text-gray-900">{project.path.split('/').pop()}</div>
-							<div class="text-sm text-gray-500">{project.path}</div>
+							<div class="flex items-start justify-between mb-3">
+								<div class="p-2 bg-blue-100 rounded-lg group-hover:bg-blue-200 transition-colors">
+									<svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+									</svg>
+								</div>
+								{#if project.diagrams && project.diagrams.length > 0}
+									<span class="px-2 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded-full">
+										{project.diagrams.length} diagrams
+									</span>
+								{/if}
+							</div>
+							<h3 class="font-semibold text-gray-900 mb-1 text-lg truncate">
+								{project.path.split('/').pop() || 'Project'}
+							</h3>
+							<p class="text-sm text-gray-500 truncate mb-2">{project.path}</p>
+							<p class="text-xs text-gray-400">
+								Last accessed: {new Date(project.lastAccessed).toLocaleDateString()}
+							</p>
 						</button>
 					{/each}
 				</div>

@@ -113,7 +113,7 @@
 				<div class="flex-1 overflow-hidden">
 					{#if $activeDiagram}
 						<DiagramViewer diagram={$activeDiagram} />
-					{:else if ($identifiedSections.length === 0)}
+					{:else if $currentProject && (!$identifiedSections.get($currentProject) || $identifiedSections.get($currentProject)?.length === 0)}
 						<div class="h-full flex flex-col items-center justify-center text-gray-500">
 							<!-- Large Loading Spinner -->
 							<svg class="animate-spin h-16 w-16 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

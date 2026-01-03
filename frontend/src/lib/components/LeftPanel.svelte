@@ -142,7 +142,10 @@
 	}
 
 	// Group sections by diagram type
-	$: groupedSections = $identifiedSections.reduce((acc, section) => {
+	// Get sections for the current project
+	$: projectSections = $currentProject ? ($identifiedSections.get($currentProject) || []) : [];
+
+	$: groupedSections = projectSections.reduce((acc, section) => {
 		const type = section.diagram_type || 'other';
 		if (!acc[type]) {
 			acc[type] = [];
@@ -243,7 +246,7 @@
 		</div>
 		{#if viewMode === 'diagrams'}
 			<p class="text-xs text-gray-500">
-				{$identifiedSections.length} diagram{$identifiedSections.length !== 1 ? 's' : ''}
+				{projectSections.length} diagram{projectSections.length !== 1 ? 's' : ''}
 			</p>
 			<button
 				on:click={handleOpenQueryDialog}
@@ -293,7 +296,7 @@
 			</div>
 		{:else}
 			<!-- Diagram View -->
-			{#if $identifiedSections.length === 0}
+			{#if projectSections.length === 0}
 				<div class="text-center text-gray-500 text-sm py-8 px-4">
 					<!-- Loading Spinner -->
 					<div class="flex justify-center items-center">

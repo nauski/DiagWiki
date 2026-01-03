@@ -329,33 +329,40 @@ Return ONLY the title text, nothing else."""
         return title
     
     def _perform_section_rag_queries(self, section_title: str) -> tuple:
-        """Perform RAG queries for a specific section."""
-        section_queries = [
-            f"How does {section_title} work?",
-            f"What are the components involved in {section_title}?",
-            f"Explain the implementation of {section_title}"
-        ]
+        """Perform RAG queries for a specific section.
         
-        logger.info(f"Performing RAG queries for section: {section_title}")
+        Optimized to use a single combined query instead of 3 separate queries.
+        This reduces LLM calls from 3 to 1 per section (3x speedup).
+        """
+        # Use a single comprehensive query instead of 3 separate queries
+        combined_query = (
+            f"Explain {section_title}: How does it work? "
+            f"What components are involved? What is the implementation?"
+        )
+        
+        logger.info(f"Performing RAG query for section: {section_title}")
         rag_results = []
         all_retrieved_docs = []
         
-        for query in section_queries:
-            try:
-                answer, retrieved_docs = self.rag.call(
-                    query=query,
-                    top_k=Const.RAG_TOP_K,
-                    use_reranking=True
-                )
+        try:
+            answer, retrieved_docs = self.rag.call(
+                query=combined_query,
+                top_k=Const.RAG_TOP_K,
+                use_reranking=True
+            )
+            # Validate answer is not None
+            if answer is None:
+                logger.warning(f"RAG query returned None for '{combined_query[:50]}...'")
+            else:
                 rag_results.append({
-                    "query": query,
-                    "answer": answer.answer,
-                    "rationale": answer.rationale
+                    "query": combined_query,
+                    "answer": answer.answer if hasattr(answer, 'answer') else str(answer),
+                    "rationale": answer.rationale if hasattr(answer, 'rationale') else ""
                 })
                 all_retrieved_docs.extend(retrieved_docs)
-                logger.info(f"RAG query completed: {query[:60]}...")
-            except Exception as e:
-                logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
+                logger.info(f"RAG query completed: {combined_query[:60]}...")
+        except Exception as e:
+            logger.warning(f"RAG query failed for '{combined_query[:50]}...': {e}")
         
         # Build RAG context
         rag_context_parts = []
