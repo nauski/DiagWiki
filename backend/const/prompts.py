@@ -532,10 +532,9 @@ def build_single_diagram_prompt(
 - Keep node labels concise (3-5 words max)
 - Every node must represent a real component/concept from the codebase, no vague concepts or placeholders
 - Can use subgraphs to group related nodes if this adds clarity
-- SPECIAL CHARACTERS: Wrap labels with @ or special chars in quotes
-  Example: A["Recall@10"] B["Precision@5"] (CORRECT)
-  Example: A[Recall@10] B[Precision@5] (WRONG - will break!)
-- Alternative: Replace special chars with words: A[Recall at 10] (also correct)
+- Critical! Wrap labels with special chars in quotes!
+  * No A[Recall@10] (run into syntax errors), use A["Recall@10"] instead
+  * Alternative: Replace special chars with words: A[Recall at 10] (also correct)
 - STYLING RULES (Premium Professional Style):
   * Use MINIMAL and SELECTIVE coloring - most nodes should use default styling
   * Apply colors ONLY to emphasize critical nodes (entry points, error states, key decision points)
