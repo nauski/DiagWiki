@@ -7,7 +7,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	let isExpanded = level === 0; // Expand root by default
+	let isExpanded = true; // Expand all folders by default
 
 	function toggleExpand() {
 		isExpanded = !isExpanded;
@@ -33,7 +33,7 @@
 </script>
 
 {#if node}
-	<div style="padding-left: {level * 12}px" class="text-xs">
+	<div style="padding-left: {level * 8}px" class="text-xs">
 		{#if node.type === 'folder'}
 			<button
 				type="button"
@@ -67,8 +67,8 @@
 				<input
 					type="checkbox"
 					checked={isSelected}
-					on:click|stopPropagation
-					class="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+					readonly
+					class="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500 pointer-events-none"
 				/>
 				<svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
 					<path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />

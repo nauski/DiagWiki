@@ -3,7 +3,18 @@
 	import { generateSectionDiagram } from '$lib/api';
 	import type { WikiSection } from '$lib/types';
 	import TreeNode from './TreeNode.svelte';
+	import QueryDialog from './QueryDialog.svelte';
 	import { retryWithBackoff } from '$lib/retry';
+
+	let showQueryDialog = false;
+
+	function handleOpenQueryDialog() {
+		showQueryDialog = true;
+	}
+
+	function handleCloseQueryDialog() {
+		showQueryDialog = false;
+	}
 
 	type ViewMode = 'diagrams' | 'tree';
 	type FolderNode = {
@@ -234,6 +245,16 @@
 			<p class="text-xs text-gray-500">
 				{$identifiedSections.length} diagram{$identifiedSections.length !== 1 ? 's' : ''}
 			</p>
+			<button
+				on:click={handleOpenQueryDialog}
+				class="mt-2 w-full px-3 py-2 text-black-600 text-sm font-medium rounded bg-blue-50 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+				title="Generate custom diagram"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+				</svg>
+				Generate Custom Diagram
+			</button>
 		{:else}
 			<p class="text-xs text-gray-500">
 				{$currentProject?.split('/').pop() || 'Project'}
@@ -355,3 +376,6 @@
 		{/if}
 	</div>
 </div>
+
+<!-- Query Dialog -->
+<QueryDialog isOpen={showQueryDialog} onClose={handleCloseQueryDialog} />

@@ -165,7 +165,7 @@ class WikiRAGQuery:
         model = get_llm_client()
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
-            "options": {"temperature": 0.7},
+            "options": {"temperature": Const.DEFAULT_TEMPERATURE},
             "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
         

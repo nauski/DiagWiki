@@ -91,6 +91,48 @@ class Const:
     GENERATION_MODEL = "qwen3-coder:30b"
     EMBEDDING_MODEL = "nomic-embed-text"
 
+    # ============================================================
+    # RAG Configuration
+    # ============================================================
+    # Maximum characters for RAG context to prevent LLM overflow
+    MAX_RAG_CONTEXT_CHARS = 100000  # ~25K tokens
+    
+    # Maximum number of source files to include in RAG context
+    MAX_SOURCES = 15
+    
+    # Maximum characters per file when reading manual references
+    MAX_FILE_CHARS = 50000
+    
+    # Default top_k for RAG queries
+    RAG_TOP_K = 20
+    
+    # Maximum tokens for document chunking
+    MAX_TOKEN_LIMIT = 8192
+    
+    # Maximum tokens for embedding (to prevent overflow)
+    MAX_EMBEDDING_TOKENS = 6000
+    
+    # Preview length for file sources
+    SOURCE_PREVIEW_LENGTH = 600
+
+    # ============================================================
+    # LLM Generation Parameters
+    # ============================================================
+    # Default temperature for creative generation (diagrams, wiki)
+    DEFAULT_TEMPERATURE = 0.7
+    
+    # Lower temperature for focused tasks (title generation)
+    FOCUSED_TEMPERATURE = 0.3
+    
+    # Context window size - use large window for all operations
+    LARGE_CONTEXT_WINDOW = 16384
+    
+    # ============================================================
+    # API Configuration
+    # ============================================================
+    # Thread pool size for async operations
+    MAX_WORKERS = 4
+
 
 def get_llm_client():
     """

@@ -87,7 +87,7 @@ class WikiDiagramGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=20,
+                    top_k=Const.RAG_TOP_K,
                     use_reranking=True
                 )
                 rag_results.append({
@@ -119,8 +119,8 @@ class WikiDiagramGenerator:
             "model": Const.GENERATION_MODEL,
             "format": "json",
             "options": {
-                "temperature": 0.7,
-                "num_ctx": 8192
+                "temperature": Const.DEFAULT_TEMPERATURE,
+                "num_ctx": Const.LARGE_CONTEXT_WINDOW
             },
             "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
         }
@@ -295,8 +295,8 @@ Return ONLY the title text, nothing else."""
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "options": {
-                "temperature": 0.3,
-                "num_ctx": 4096
+                "temperature": Const.FOCUSED_TEMPERATURE,
+                "num_ctx": Const.LARGE_CONTEXT_WINDOW
             },
             "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
         }
@@ -344,7 +344,7 @@ Return ONLY the title text, nothing else."""
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=20,
+                    top_k=Const.RAG_TOP_K,
                     use_reranking=True
                 )
                 rag_results.append({
@@ -358,8 +358,6 @@ Return ONLY the title text, nothing else."""
                 logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
         
         # Build RAG context
-        MAX_RAG_CONTEXT_CHARS = 100000
-        
         rag_context_parts = []
         current_length = 0
         
@@ -367,9 +365,9 @@ Return ONLY the title text, nothing else."""
             part = f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
             part_length = len(part)
             
-            if current_length + part_length > MAX_RAG_CONTEXT_CHARS:
+            if current_length + part_length > Const.MAX_RAG_CONTEXT_CHARS:
                 # Truncate last part to fit
-                remaining = MAX_RAG_CONTEXT_CHARS - current_length
+                remaining = Const.MAX_RAG_CONTEXT_CHARS - current_length
                 if remaining > 100:  # Only add if meaningful space left
                     truncated = part[:remaining] + "\n\n[... truncated for size limits ...]"
                     rag_context_parts.append(truncated)
@@ -391,12 +389,9 @@ Return ONLY the title text, nothing else."""
                 unique_docs.append(doc)
         
         # Also limit retrieved sources to prevent overflow
-        MAX_SOURCE_CHARS_EACH = 600  # Reduced from 800
-        MAX_SOURCES = 15
-        
         retrieved_sources = "\n\n".join([
-            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:MAX_SOURCE_CHARS_EACH]}"
-            for i, doc in enumerate(unique_docs[:MAX_SOURCES])
+            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:Const.SOURCE_PREVIEW_LENGTH]}"
+            for i, doc in enumerate(unique_docs[:Const.MAX_SOURCES])
         ])
         logger.info(f"Retrieved sources size: {len(retrieved_sources)} chars (~{len(retrieved_sources)//4} tokens)")
         
@@ -421,8 +416,6 @@ Return ONLY the title text, nothing else."""
         rag_context_parts = []
         retrieved_sources_parts = []
         
-        MAX_FILE_CHARS = 50000  # Limit per file to prevent overflow
-        
         for i, file_path in enumerate(file_paths):
             # Construct full path
             full_path = os.path.join(self.root_path, file_path)
@@ -436,8 +429,8 @@ Return ONLY the title text, nothing else."""
                     content = f.read()
                 
                 # Truncate if too large
-                if len(content) > MAX_FILE_CHARS:
-                    content = content[:MAX_FILE_CHARS] + "\n\n[... truncated for size limits ...]"
+                if len(content) > Const.MAX_FILE_CHARS:
+                    content = content[:Const.MAX_FILE_CHARS] + "\n\n[... truncated for size limits ...]"
                 
                 # Create mock document
                 doc = Document(
@@ -450,9 +443,8 @@ Return ONLY the title text, nothing else."""
                 rag_context_parts.append(f"File: {file_path}\n{content}")
                 
                 # Add to sources (with preview)
-                preview_length = 600
                 retrieved_sources_parts.append(
-                    f"Source {i+1} ({file_path}):\n{content[:preview_length]}"
+                    f"Source {i+1} ({file_path}):\n{content[:Const.SOURCE_PREVIEW_LENGTH]}"
                 )
                 
                 logger.info(f"Read reference file: {file_path} ({len(content)} chars)")
@@ -490,8 +482,8 @@ Return ONLY the title text, nothing else."""
             "model": Const.GENERATION_MODEL,
             "format": "json",
             "options": {
-                "temperature": 0.7,
-                "num_ctx": 16384
+                "temperature": Const.DEFAULT_TEMPERATURE,
+                "num_ctx": Const.LARGE_CONTEXT_WINDOW
             },
             "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
         }

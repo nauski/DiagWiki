@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class RepoUtil:
     """Utility class for repository operations"""
-    MAX_TOKEN_LIMIT = 8192
+    MAX_TOKEN_LIMIT = Const.MAX_TOKEN_LIMIT
 
     @staticmethod
     def build_tree(current_path):

@@ -141,7 +141,7 @@ class WikiGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=20,
+                    top_k=Const.RAG_TOP_K,
                     use_reranking=True
                 )
                 rag_insights.append({
@@ -169,8 +169,8 @@ class WikiGenerator:
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "options": {
-                "temperature": 0.7,
-                "num_ctx": 8192
+                "temperature": Const.DEFAULT_TEMPERATURE,
+                "num_ctx": Const.LARGE_CONTEXT_WINDOW
             },
             "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
@@ -264,7 +264,7 @@ class WikiGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=20,
+                    top_k=Const.RAG_TOP_K,
                     use_reranking=True
                 )
                 rag_results.append({
@@ -331,8 +331,8 @@ class WikiGenerator:
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "options": {
-                "temperature": 0.7,
-                "num_ctx": 16384
+                "temperature": Const.DEFAULT_TEMPERATURE,
+                "num_ctx": Const.LARGE_CONTEXT_WINDOW
             },
             "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
@@ -468,7 +468,7 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=user_prompt,
-                top_k=20,
+                top_k=Const.RAG_TOP_K,
                 use_reranking=True
             )
             
@@ -493,7 +493,7 @@ class WikiGenerator:
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "format": "json",
-            "options": {"temperature": 0.7, "num_ctx": 16384},
+            "options": {"temperature": Const.DEFAULT_TEMPERATURE, "num_ctx": Const.LARGE_CONTEXT_WINDOW},
             "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
         
@@ -587,7 +587,7 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=prompt,
-                top_k=20,
+                top_k=Const.RAG_TOP_K,
                 use_reranking=True
             )
             
@@ -611,7 +611,7 @@ class WikiGenerator:
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "format": "json",
-            "options": {"temperature": 0.7, "num_ctx": 16384},
+            "options": {"temperature": Const.DEFAULT_TEMPERATURE, "num_ctx": Const.LARGE_CONTEXT_WINDOW},
             "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
         
@@ -757,7 +757,7 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=f"{existing_content.get('section_title', '')} {modification_prompt}",
-                top_k=20,
+                top_k=Const.RAG_TOP_K,
                 use_reranking=True
             )
             
@@ -782,7 +782,7 @@ class WikiGenerator:
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
             "format": "json",
-            "options": {"temperature": 0.7, "num_ctx": 16384},
+            "options": {"temperature": Const.DEFAULT_TEMPERATURE, "num_ctx": Const.LARGE_CONTEXT_WINDOW},
             "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
         

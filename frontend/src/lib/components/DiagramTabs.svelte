@@ -1,9 +1,6 @@
 <script lang="ts">
 	import { currentProject, identifiedSections, openTabs, activeTabIndex, closeDiagramTab, openDiagramTab } from '$lib/stores';
-	import QueryDialog from './QueryDialog.svelte';
 	import { onMount } from 'svelte';
-
-	let showQueryDialog = false;
 
 	function handleGoHome() {
 		currentProject.set(null);
@@ -19,14 +16,6 @@
 	function handleCloseTab(event: MouseEvent, index: number) {
 		event.stopPropagation();
 		closeDiagramTab(index);
-	}
-
-	function handleOpenQueryDialog() {
-		showQueryDialog = true;
-	}
-
-	function handleCloseQueryDialog() {
-		showQueryDialog = false;
 	}
 
 	// Listen for custom diagram generation events
@@ -87,19 +76,5 @@
 				</div>
 			{/each}
 		{/if}
-
-		<!-- Add New Diagram Button (always visible) -->
-		<button
-			on:click={handleOpenQueryDialog}
-			class="flex-shrink-0 px-3 py-2 flex items-center justify-center text-blue-600 hover:bg-blue-50 border-l border-gray-300 transition-colors"
-			title="Generate custom diagram"
-		>
-			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-			</svg>
-		</button>
 	</div>
 </div>
-
-<!-- Query Dialog -->
-<QueryDialog isOpen={showQueryDialog} onClose={handleCloseQueryDialog} />

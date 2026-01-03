@@ -3,6 +3,7 @@
 	import { generateSectionDiagram } from '$lib/api';
 	import type { WikiSection } from '$lib/types';
 	import FileTreeNode from './FileTreeNode.svelte';
+	import { loadConstants, getConstants } from '$lib/constants';
 
 	export let isOpen = false;
 	export let onClose: () => void;
@@ -12,11 +13,20 @@
 	let selectedDiagramType: 'flowchart' | 'sequence' | 'class' | 'stateDiagram' | 'erDiagram' = 'flowchart';
 	let referenceMode: 'auto' | 'manual' = 'auto';
 	let selectedFiles: string[] = [];
+	let selectedFileSizes: Map<string, number> = new Map();
 	let showFileSelector = false;
 	let fileTree: any = null;
 	let error = '';
 	let generatingInBackground: Set<string> = new Set();
 	let isGenerating = false;
+	
+	// Load constants from backend on mount
+	loadConstants();
+	
+	$: constants = getConstants();
+	$: totalSelectedSize = Array.from(selectedFileSizes.values()).reduce((sum, size) => sum + size, 0);
+	$: sizeWarningLevel = totalSelectedSize > constants.MAX_RAG_CONTEXT_CHARS * 0.9 ? 'danger' : 
+	                       totalSelectedSize > constants.MAX_RAG_CONTEXT_CHARS * 0.75 ? 'warning' : 'ok';
 
 	const diagramTypes = [
 		{ value: 'flowchart', label: 'Flowchart', description: 'Process flows, system architecture' },
@@ -45,11 +55,36 @@
 		}
 	}
 
-	function toggleFileSelection(filePath: string) {
+	async function toggleFileSelection(filePath: string) {
 		if (selectedFiles.includes(filePath)) {
 			selectedFiles = selectedFiles.filter(f => f !== filePath);
+			selectedFileSizes.delete(filePath);
+			selectedFileSizes = selectedFileSizes;
 		} else {
 			selectedFiles = [...selectedFiles, filePath];
+			// Fetch file size
+			try {
+				const response = await fetch('http://localhost:8001/file_content', {
+					method: 'GET',
+					headers: { 'Content-Type': 'application/json' }
+				});
+				const params = new URLSearchParams({
+					root: $currentProject || '',
+					path: filePath
+				});
+				const fileResponse = await fetch(`http://localhost:8001/file_content?${params}`);
+				if (fileResponse.ok) {
+					const data = await fileResponse.json();
+					const size = data.content?.length || 0;
+					selectedFileSizes.set(filePath, size);
+					selectedFileSizes = selectedFileSizes;
+				}
+			} catch (err) {
+				console.error('Failed to get file size:', err);
+				// Estimate 5KB per file as fallback
+				selectedFileSizes.set(filePath, 5000);
+				selectedFileSizes = selectedFileSizes;
+			}
 		}
 	}
 
@@ -144,6 +179,7 @@
 			selectedSectionId = '';
 			selectedDiagramType = 'flowchart';
 			selectedFiles = [];
+			selectedFileSizes = new Map();
 			referenceMode = 'auto';
 			onClose();
 		} catch (err) {
@@ -261,7 +297,9 @@
 					{#if referenceMode === 'auto'}
 						<p class="text-xs text-gray-500 mt-1">Backend will automatically retrieve relevant files</p>
 					{:else}
-						<p class="text-xs text-gray-500 mt-1">Select specific files to reference ({selectedFiles.length} selected)</p>
+						<p class="text-xs text-gray-500 mt-1">
+							Select specific files to reference (limit: {(constants.MAX_RAG_CONTEXT_CHARS / 1000).toFixed(0)}KB)
+						</p>
 					{/if}
 				</div>
 
@@ -269,15 +307,41 @@
 				{#if referenceMode === 'manual'}
 					<div class="border border-gray-300 rounded-md overflow-hidden">
 						<div class="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between items-center">
-							<span class="text-xs font-medium text-gray-700">Select Files</span>
+							<div class="flex flex-col">
+								<span class="text-xs font-medium text-gray-700">Select Files</span>
+								<span class="text-xs text-gray-500">
+									{selectedFiles.length} selected
+									{#if totalSelectedSize > 0}
+										· {(totalSelectedSize / 1000).toFixed(1)}KB
+										{#if sizeWarningLevel === 'danger'}
+											<span class="text-red-600 font-medium">⚠️ Exceeds limit!</span>
+										{:else if sizeWarningLevel === 'warning'}
+											<span class="text-orange-600">⚠️ Near limit</span>
+										{/if}
+									{/if}
+								</span>
+							</div>
 							<button
 								type="button"
-								on:click={() => selectedFiles = []}
+								on:click={() => { selectedFiles = []; selectedFileSizes = new Map(); }}
 								class="text-xs text-blue-600 hover:text-blue-700"
 							>
 								Clear All
 							</button>
 						</div>
+						{#if sizeWarningLevel === 'danger'}
+							<div class="px-3 py-2 bg-red-50 border-b border-red-200">
+								<p class="text-xs text-red-700">
+									⚠️ Total size exceeds {(constants.MAX_RAG_CONTEXT_CHARS / 1000).toFixed(0)}KB limit. Backend may fail to process.
+								</p>
+							</div>
+						{:else if sizeWarningLevel === 'warning'}
+							<div class="px-3 py-2 bg-orange-50 border-b border-orange-200">
+								<p class="text-xs text-orange-700">
+									⚠️ Approaching {(constants.MAX_RAG_CONTEXT_CHARS / 1000).toFixed(0)}KB limit ({((totalSelectedSize / constants.MAX_RAG_CONTEXT_CHARS) * 100).toFixed(0)}%)
+								</p>
+							</div>
+						{/if}
 						<div class="max-h-48 overflow-y-auto p-2">
 							{#if fileTree}
 								<FileTreeNode 

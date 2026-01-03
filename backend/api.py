@@ -17,7 +17,7 @@ from const.const import Const
 logger = logging.getLogger(__name__)
 
 # Create a thread pool executor for blocking operations
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=Const.MAX_WORKERS)
 
 
 @asynccontextmanager
@@ -59,6 +59,24 @@ async def health_check():
         "app": APP_NAME,
         "version": APP_VERSION,
         "environment": Config.ENVIRONMENT
+    }
+
+# Constants endpoint for frontend
+@app.get("/constants")
+async def get_constants():
+    """Get backend constants for frontend to use."""
+    return {
+        "MAX_RAG_CONTEXT_CHARS": Const.MAX_RAG_CONTEXT_CHARS,
+        "MAX_SOURCES": Const.MAX_SOURCES,
+        "MAX_FILE_CHARS": Const.MAX_FILE_CHARS,
+        "RAG_TOP_K": Const.RAG_TOP_K,
+        "SOURCE_PREVIEW_LENGTH": Const.SOURCE_PREVIEW_LENGTH,
+        "DEFAULT_TEMPERATURE": Const.DEFAULT_TEMPERATURE,
+        "FOCUSED_TEMPERATURE": Const.FOCUSED_TEMPERATURE,
+        "LARGE_CONTEXT_WINDOW": Const.LARGE_CONTEXT_WINDOW,
+        "LLM_TIMEOUT": Const.LLM_TIMEOUT,
+        "GENERATION_MODEL": Const.GENERATION_MODEL,
+        "EMBEDDING_MODEL": Const.EMBEDDING_MODEL
     }
 
 # Root endpoint
