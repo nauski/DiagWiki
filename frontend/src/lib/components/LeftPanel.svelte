@@ -235,7 +235,7 @@
 			</h3>
 			<button
 				on:click={() => viewMode = viewMode === 'diagrams' ? 'tree' : 'diagrams'}
-				class="text-xs px-2 py-1 rounded hover:bg-gray-200 text-gray-600 transition-colors"
+				class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-black-600 transition-colors"
 				title="Toggle view"
 			>
 				{viewMode === 'diagrams' ? 'Tree View' : 'Diagram View'}
@@ -259,6 +259,16 @@
 			<p class="text-xs text-gray-500">
 				{$currentProject?.split('/').pop() || 'Project'}
 			</p>
+			<button
+				on:click={handleOpenQueryDialog}
+				class="mt-2 w-full px-3 py-2 text-black-600 text-sm font-medium rounded bg-blue-50 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+				title="Generate custom diagram"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+				</svg>
+				Generate Custom Diagram
+			</button>
 		{/if}
 	</div>
 

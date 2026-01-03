@@ -281,7 +281,7 @@ FORMATTING RULES:
         try:
             # FAISS retriever configuration
             retriever_config = {
-                "top_k": 20,
+                "top_k": Const.RAG_TOP_K,
                 "dimensions": 768,  # nomic-embed-text dimension
                 "metric": "cosine"
             }

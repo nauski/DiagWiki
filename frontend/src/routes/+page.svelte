@@ -1,11 +1,61 @@
 <script lang="ts">
-	import { currentProject, leftPanelOpen, rightPanelOpen, activeDiagram, identifiedSections } from '$lib/stores';
+	import { currentProject, leftPanelOpen, rightPanelOpen, activeDiagram, identifiedSections, openTabs, activeTabIndex, saveProjectTabs, restoreProjectTabs, diagramCache, generatedDiagrams } from '$lib/stores';
 	import FolderPicker from '$lib/components/FolderPicker.svelte';
 	import DiagramTabs from '$lib/components/DiagramTabs.svelte';
 	import LeftPanel from '$lib/components/LeftPanel.svelte';
 	import RightPanel from '$lib/components/RightPanel.svelte';
 	import DiagramViewer from '$lib/components/DiagramViewer.svelte';
 	import QueryInput from '$lib/components/QueryInput.svelte';
+
+	let previousProject: string | null = null;
+
+	// Watch for project changes to save/restore tabs
+	$: if ($currentProject !== previousProject) {
+		// Save tabs for previous project (if it was a project, not home)
+		if (previousProject) {
+			console.log('[Tab Persistence] Saving tabs for:', previousProject, 'Tabs:', $openTabs.length);
+			saveProjectTabs(previousProject, $openTabs, $activeTabIndex);
+		}
+		
+		// Restore tabs for new project or clear when going home
+		if ($currentProject) {
+			const saved = restoreProjectTabs($currentProject);
+			if (saved && saved.tabs.length > 0) {
+				console.log('[Tab Persistence] Restoring tabs for:', $currentProject, 'Tabs:', saved.tabs.length);
+				openTabs.set(saved.tabs);
+				activeTabIndex.set(saved.activeIndex);
+				
+				// Also restore to cache and mark as generated
+				diagramCache.update(cache => {
+					const newCache = new Map(cache);
+					saved.tabs.forEach(tab => {
+						newCache.set(tab.section_id, tab);
+					});
+					return newCache;
+				});
+				
+				generatedDiagrams.update(set => {
+					const newSet = new Set(set);
+					saved.tabs.forEach(tab => {
+						newSet.add(tab.section_id);
+					});
+					return newSet;
+				});
+			} else {
+				// No saved tabs, start fresh
+				console.log('[Tab Persistence] No saved tabs for:', $currentProject);
+				openTabs.set([]);
+				activeTabIndex.set(0);
+			}
+		} else {
+			// Going home, clear tabs
+			console.log('[Tab Persistence] Going home, clearing tabs');
+			openTabs.set([]);
+			activeTabIndex.set(0);
+		}
+		
+		previousProject = $currentProject;
+	}
 
 	let leftPanelWidth = 250;
 	let rightPanelWidth = 300;
@@ -77,28 +127,30 @@
 				<QueryInput />
 			</div>
 
-			<!-- Toggle Right Panel Button -->
-			<button
-				on:click={toggleRightPanel}
-				class="flex-shrink-0 w-8 bg-gray-100 hover:bg-gray-200 flex items-center justify-center border-l border-gray-200"
-				title={$rightPanelOpen ? 'Hide panel' : 'Show panel'}
-			>
-				<svg
-					class="w-4 h-4 transform transition-transform"
-					class:rotate-180={$rightPanelOpen}
-					fill="currentColor"
-					viewBox="0 0 20 20"
+			<!-- Toggle Right Panel Button (only show if tabs are open) -->
+			{#if $activeDiagram}
+				<button
+					on:click={toggleRightPanel}
+					class="flex-shrink-0 w-8 bg-gray-100 hover:bg-gray-200 flex items-center justify-center border-l border-gray-200"
+					title={$rightPanelOpen ? 'Hide panel' : 'Show panel'}
 				>
-					<path
-						fill-rule="evenodd"
-						d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-						clip-rule="evenodd"
-					/>
-				</svg>
-			</button>
+					<svg
+						class="w-4 h-4 transform transition-transform"
+						class:rotate-180={$rightPanelOpen}
+						fill="currentColor"
+						viewBox="0 0 20 20"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+				</button>
+			{/if}
 
-			<!-- Right Panel: Explanations -->
-			{#if $rightPanelOpen}
+			<!-- Right Panel: Explanations (only show if tabs are open) -->
+			{#if $rightPanelOpen && $activeDiagram}
 				<div
 					class="flex-shrink-0"
 					style="width: {rightPanelWidth}px; min-width: 250px; max-width: 500px;"

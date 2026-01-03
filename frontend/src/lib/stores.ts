@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import type { ProjectHistory, WikiSection, DiagramSection } from './types';
 
 // Current project path
@@ -36,6 +36,26 @@ export const openTabs = writable<DiagramSection[]>([]);
 
 // Active tab index
 export const activeTabIndex = writable<number>(0);
+
+// Per-project tab storage (persisted in localStorage)
+export const projectTabs = writable<Map<string, { tabs: DiagramSection[], activeIndex: number }>>(new Map());
+
+// Load project tabs from localStorage on init
+if (typeof window !== 'undefined') {
+	const stored = localStorage.getItem('diagwiki_project_tabs');
+	if (stored) {
+		const parsed = JSON.parse(stored);
+		projectTabs.set(new Map(Object.entries(parsed)));
+	}
+}
+
+// Save to localStorage whenever projectTabs changes
+projectTabs.subscribe((value) => {
+	if (typeof window !== 'undefined') {
+		const obj = Object.fromEntries(value.entries());
+		localStorage.setItem('diagwiki_project_tabs', JSON.stringify(obj));
+	}
+});
 
 // Selected node/edge for explanation panel
 export const selectedElement = writable<{
@@ -122,4 +142,19 @@ export function closeDiagramTab(index: number) {
 		});
 		return newTabs;
 	});
+}
+
+// Save current tabs for a project
+export function saveProjectTabs(projectPath: string, tabs: DiagramSection[], activeIndex: number) {
+	projectTabs.update(map => {
+		const newMap = new Map(map);
+		newMap.set(projectPath, { tabs, activeIndex });
+		return newMap;
+	});
+}
+
+// Restore tabs for a project
+export function restoreProjectTabs(projectPath: string): { tabs: DiagramSection[], activeIndex: number } | null {
+	const map = get(projectTabs);
+	return map.get(projectPath) || null;
 }

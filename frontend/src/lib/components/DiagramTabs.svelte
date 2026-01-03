@@ -3,10 +3,8 @@
 	import { onMount } from 'svelte';
 
 	function handleGoHome() {
+		// Only set currentProject to null - let the reactive logic in +page.svelte handle the rest
 		currentProject.set(null);
-		identifiedSections.set([]);
-		openTabs.set([]);
-		activeTabIndex.set(0);
 	}
 
 	function handleTabClick(index: number) {
