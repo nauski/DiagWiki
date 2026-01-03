@@ -485,6 +485,18 @@ class SectionDiagramRequest(BaseModel):
     reference_files: Optional[List[str]] = Field(None, description="Optional list of specific file paths to use as reference instead of RAG")
 
 
+class FixDiagramRequest(BaseModel):
+    root_path: str = Field(..., description="Root path to the folder")
+    section_id: str = Field(..., description="Section ID of the diagram to fix")
+    section_title: str = Field(..., description="Title of this section")
+    section_description: str = Field(..., description="Description of what this section covers")
+    diagram_type: str = Field(..., description="Type of Mermaid diagram")
+    key_concepts: List[str] = Field(..., description="List of key concepts")
+    language: str = Field("en", description="Language code")
+    corrupted_diagram: str = Field(..., description="The corrupted Mermaid diagram code")
+    error_message: str = Field(..., description="The Mermaid rendering error message")
+
+
 @app.post("/identifyDiagramSections")
 async def identify_diagram_sections(request: DiagramSectionsRequest = Body(...)):
     """
@@ -630,6 +642,79 @@ def _generate_diagram_sync(
         language=language,
         use_cache=True,
         reference_files=reference_files
+    )
+
+
+@app.post("/fixCorruptedDiagram")
+async def fix_corrupted_diagram(request: FixDiagramRequest = Body(...)):
+    """
+    Fix a corrupted Mermaid diagram that failed to render.
+    
+    This endpoint takes a diagram that has rendering errors and regenerates it
+    with explicit error correction instructions to the LLM.
+    
+    Args:
+        request: FixDiagramRequest with corrupted diagram and error details
+        
+    Returns:
+        JSON with corrected diagram
+    """
+    try:
+        logger.info(f"Fixing corrupted diagram for section: {request.section_title}")
+        logger.info(f"Error: {request.error_message[:100]}...")
+        
+        # Validate folder
+        if not os.path.exists(request.root_path):
+            raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
+        
+        # Run blocking operation in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            executor,
+            _fix_diagram_sync,
+            request.root_path,
+            request.section_id,
+            request.section_title,
+            request.section_description,
+            request.diagram_type,
+            request.key_concepts,
+            request.language,
+            request.corrupted_diagram,
+            request.error_message
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fixing corrupted diagram: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fix corrupted diagram: {str(e)}")
+
+
+def _fix_diagram_sync(
+    root_path: str,
+    section_id: str,
+    section_title: str,
+    section_description: str,
+    diagram_type: str,
+    key_concepts: list,
+    language: str,
+    corrupted_diagram: str,
+    error_message: str
+):
+    """Synchronous function to run in thread pool."""
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    wiki_gen = WikiGenerator(root_path=root_path, data_dir=data_dir)
+    return wiki_gen.fix_corrupted_diagram(
+        section_id=section_id,
+        section_title=section_title,
+        section_description=section_description,
+        diagram_type=diagram_type,
+        key_concepts=key_concepts,
+        language=language,
+        corrupted_diagram=corrupted_diagram,
+        error_message=error_message
     )
 
 

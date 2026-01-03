@@ -274,6 +274,96 @@ class WikiDiagramGenerator:
         
         return result
     
+    def fix_corrupted_diagram(
+        self,
+        section_id: str,
+        section_title: str,
+        section_description: str,
+        diagram_type: str,
+        key_concepts: List[str],
+        language: str,
+        corrupted_diagram: str,
+        error_message: str
+    ) -> Dict:
+        """
+        Fix a corrupted Mermaid diagram that failed to render.
+        
+        This method regenerates the diagram with explicit error correction context.
+        It does NOT use cache since we're fixing a broken diagram.
+        
+        Args:
+            section_id: Section ID
+            section_title: Title of the section
+            section_description: Description of the section
+            diagram_type: Type of diagram
+            key_concepts: List of key concepts
+            language: Language code
+            corrupted_diagram: The corrupted Mermaid code
+            error_message: The error message from Mermaid renderer
+        
+        Returns:
+            Dict with corrected diagram
+        """
+        logger.info(f"Fixing corrupted diagram for: {section_title}")
+        logger.info(f"Mermaid error: {error_message[:200]}...")
+        
+        # Ensure RAG is initialized
+        if self.rag is None:
+            raise RuntimeError("RAG not initialized. Call initialize_rag() first.")
+        
+        # Perform RAG queries to get context (same as normal generation)
+        rag_context, retrieved_sources, all_retrieved_docs = self._perform_section_rag_queries(
+            section_title if len(section_title) < 60 else section_description
+        )
+        
+        # Build error correction prompt
+        from const.prompts import build_diagram_correction_prompt
+        correction_prompt = build_diagram_correction_prompt(
+            section_title=section_title,
+            section_description=section_description,
+            diagram_type=diagram_type,
+            key_concepts=key_concepts,
+            rag_context=rag_context,
+            retrieved_sources=retrieved_sources,
+            corrupted_diagram=corrupted_diagram,
+            error_message=error_message,
+            language=language
+        )
+        
+        # Call LLM to fix the diagram
+        diagram_data = self._generate_diagram_with_llm(correction_prompt)
+        
+        # Extract source files
+        source_files = []
+        seen_paths = set()
+        for doc in all_retrieved_docs:
+            if hasattr(doc, 'meta_data'):
+                file_path = doc.meta_data.get('file_path', '')
+                if file_path and file_path not in seen_paths:
+                    seen_paths.add(file_path)
+                    source_files.append({
+                        "file": file_path,
+                        "relevance": f"Used to fix {section_title}"
+                    })
+        
+        # Process the corrected diagram
+        result = self._process_diagram_response(
+            diagram_data,
+            section_id,
+            section_title,
+            section_description,
+            language,
+            len(rag_context.split('\n\n')),
+            source_files
+        )
+        
+        # Cache the corrected diagram if successful
+        if result.get("status") == "success":
+            self._cache_diagram_result(result)
+            logger.info(f"✅ Successfully fixed and cached diagram for: {section_title}")
+        
+        return result
+    
     def _generate_concise_title(self, prompt: str, description: str) -> str:
         """Generate a concise title from a user prompt for custom diagrams."""
         title_prompt = f"""Given this user request for a diagram:

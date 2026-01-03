@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { identifiedSections, currentProject, openDiagramTab, openTabs, generatedDiagrams, activeTabIndex, diagramCache, failedSections } from '$lib/stores';
-	import { generateSectionDiagram } from '$lib/api';
+	import { identifiedSections, currentProject, openDiagramTab, openTabs, generatedDiagrams, activeTabIndex, diagramCache, failedSections, corruptedDiagrams } from '$lib/stores';
+	import { generateSectionDiagram, fixCorruptedDiagram } from '$lib/api';
 	import type { WikiSection } from '$lib/types';
 	import TreeNode from './TreeNode.svelte';
 	import QueryDialog from './QueryDialog.svelte';
@@ -75,6 +75,68 @@
 		if (!$currentProject) return false;
 		return $failedSections.get($currentProject)?.has(sectionId) || false;
 	};
+	
+	// Check if diagram has rendering errors
+	$: isCorrupted = (sectionId: string): boolean => {
+		return $corruptedDiagrams.has(sectionId);
+	};
+	
+	// Handle fix for corrupted diagrams
+	async function handleFixDiagram(section: WikiSection, event: Event) {
+		event.stopPropagation();
+		
+		if (!$currentProject) return;
+		
+		const errorMessage = $corruptedDiagrams.get(section.section_id);
+		if (!errorMessage) return;
+		
+		const cachedDiagram = $diagramCache.get(section.section_id);
+		if (!cachedDiagram) return;
+		
+		console.log(`[${section.section_id}] Fixing corrupted diagram...`);
+		
+		try {
+			const fixedDiagram = await fixCorruptedDiagram(
+				$currentProject,
+				section,
+				cachedDiagram.diagram.mermaid_code,
+				errorMessage
+			);
+			
+			if (fixedDiagram.status === 'success') {
+				console.log(`[${section.section_id}] Fix successful!`);
+				
+				// Update cache with fixed diagram
+				diagramCache.update(cache => {
+					const newCache = new Map(cache);
+					newCache.set(section.section_id, fixedDiagram);
+					return newCache;
+				});
+				
+				// Remove from corrupted set
+				corruptedDiagrams.update(map => {
+					const newMap = new Map(map);
+					newMap.delete(section.section_id);
+					return newMap;
+				});
+				
+				// Update open tab if it exists
+				const tabIndex = $openTabs.findIndex(t => t.section_id === section.section_id);
+				if (tabIndex !== -1) {
+					openTabs.update(tabs => {
+						const newTabs = [...tabs];
+						newTabs[tabIndex] = fixedDiagram;
+						return newTabs;
+					});
+				}
+			} else {
+				throw new Error(fixedDiagram.error || 'Fix failed');
+			}
+		} catch (error) {
+			console.error(`[${section.section_id}] Fix failed:`, error);
+			alert(`Failed to fix diagram: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
 	
 	// Handle retry for failed sections
 	async function handleRetry(section: WikiSection, event: Event) {
@@ -333,52 +395,75 @@
 						{#if expandedGroups.has(type)}
 							<div class="ml-6 space-y-1 mt-1">
 								{#each sections as section}
-									<button
-										on:click={() => handleSectionClick(section)}
-										disabled={!isReady(section.section_id) && !isFailed(section.section_id)}
-										class="w-full text-left px-3 py-2 rounded transition-colors group relative"
+									<div
+										class="w-full px-3 py-2 rounded transition-colors group relative"
 										class:bg-blue-50={isOpen(section.section_id)}
 										class:bg-red-50={isFailed(section.section_id)}
-										class:border-l-2={isOpen(section.section_id) || isFailed(section.section_id)}
+										class:bg-orange-50={isCorrupted(section.section_id)}
+										class:border-l-2={isOpen(section.section_id) || isFailed(section.section_id) || isCorrupted(section.section_id)}
 										class:border-blue-500={isOpen(section.section_id)}
 										class:border-red-500={isFailed(section.section_id)}
-										class:hover:bg-gray-50={!isReady(section.section_id) && !isFailed(section.section_id)}
-										class:cursor-wait={!isReady(section.section_id) && !isFailed(section.section_id)}
+										class:border-orange-500={isCorrupted(section.section_id)}
 									>
-										<div class="flex items-start gap-2">
-											<div class="flex-1 min-w-0">
-												<div class="text-sm font-medium text-gray-900 flex items-center gap-2" title="{section.section_title}">
-													<span class="truncate">{section.section_title}</span>
-													{#if isFailed(section.section_id)}
-														<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 flex-shrink-0">
-															Failed
-														</span>
-													{:else if !isReady(section.section_id)}
-														<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 flex-shrink-0">
-															Loading...
-														</span>
-													{/if}
+										<button
+											on:click={() => handleSectionClick(section)}
+											disabled={!isReady(section.section_id) && !isFailed(section.section_id)}
+											class="w-full text-left"
+											class:hover:opacity-80={isReady(section.section_id)}
+											class:cursor-wait={!isReady(section.section_id) && !isFailed(section.section_id)}
+										>
+											<div class="flex items-start gap-2">
+												<div class="flex-1 min-w-0">
+													<div class="text-sm font-medium text-gray-900 flex items-center gap-2" title="{section.section_title}">
+														<span class="truncate">{section.section_title}</span>
+														{#if isFailed(section.section_id)}
+															<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 flex-shrink-0">
+																Failed
+															</span>
+														{:else if isCorrupted(section.section_id)}
+															<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 flex-shrink-0">
+																Error
+															</span>
+														{:else if !isReady(section.section_id)}
+															<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 flex-shrink-0">
+																Loading...
+															</span>
+														{/if}
+													</div>
 												</div>
-												{#if isFailed(section.section_id)}
-													<div class="flex items-center gap-2 mt-1">
-														<span class="text-xs text-red-600">
-															Generation failed after 3 attempts
-														</span>
-														<button
-															on:click={(e) => handleRetry(section, e)}
-															class="text-xs px-2 py-0.5 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-														>
-															Retry
-														</button>
-													</div>
-												{:else if !isReady(section.section_id)}
-													<div class="text-xs text-gray-500 mt-1">
-														Queued for generation...
-													</div>
-												{/if}
 											</div>
-										</div>
-									</button>
+										</button>
+										<!-- Action buttons outside the clickable area -->
+										{#if isFailed(section.section_id)}
+											<div class="flex items-center gap-2 mt-1">
+												<span class="text-xs text-red-600">
+													Generation failed after 3 attempts
+												</span>
+												<button
+													on:click={(e) => handleRetry(section, e)}
+													class="text-xs px-2 py-0.5 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+												>
+													Retry
+												</button>
+											</div>
+										{:else if isCorrupted(section.section_id)}
+											<div class="flex items-center gap-2 mt-1">
+												<span class="text-xs text-orange-600">
+													Diagram has rendering errors
+												</span>
+												<button
+													on:click={(e) => handleFixDiagram(section, e)}
+													class="text-xs px-2 py-0.5 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+												>
+													Fix
+												</button>
+											</div>
+										{:else if !isReady(section.section_id)}
+											<div class="text-xs text-gray-500 mt-1">
+												Queued for generation...
+											</div>
+										{/if}
+									</div>
 								{/each}
 							</div>
 						{/if}

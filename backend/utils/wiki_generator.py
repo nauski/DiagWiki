@@ -422,6 +422,40 @@ class WikiGenerator:
             diagram_type, key_concepts, language, use_cache, reference_files
         )
     
+    def fix_corrupted_diagram(
+        self,
+        section_id: str,
+        section_title: str,
+        section_description: str,
+        diagram_type: str,
+        key_concepts: List[str],
+        language: str,
+        corrupted_diagram: str,
+        error_message: str
+    ) -> Dict:
+        """
+        Fix a corrupted Mermaid diagram that failed to render.
+        
+        Args:
+            section_id: Section ID
+            section_title: Title of the section
+            section_description: Description of the section
+            diagram_type: Type of diagram
+            key_concepts: List of key concepts
+            language: Language code
+            corrupted_diagram: The corrupted Mermaid code
+            error_message: The error message from Mermaid
+        
+        Returns:
+            Dict with corrected diagram
+        """
+        self.initialize_rag()
+        return self.diagram_generator.fix_corrupted_diagram(
+            section_id, section_title, section_description,
+            diagram_type, key_concepts, language,
+            corrupted_diagram, error_message
+        )
+    
     def analyze_wiki_problem(
         self,
         user_prompt: str,

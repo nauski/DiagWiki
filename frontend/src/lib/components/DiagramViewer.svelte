@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount, onDestroy, afterUpdate } from 'svelte';
+	import { onMount, onDestroy, afterUpdate, tick } from 'svelte';
 	import type { DiagramSection } from '$lib/types';
-	import { selectedElement, rightPanelOpen } from '$lib/stores';
+	import { selectedElement, rightPanelOpen, corruptedDiagrams } from '$lib/stores';
+	import { get } from 'svelte/store';
 	import mermaid from 'mermaid';
 	import panzoom from 'panzoom';
 	import { jsPDF } from 'jspdf';
@@ -27,17 +28,48 @@
 			flowchart: { useMaxWidth: true, htmlLabels: true }
 		});
 
-		await renderDiagram();
+		// Check if this diagram is already marked as corrupted
+		const isAlreadyCorrupted = $corruptedDiagrams.has(diagram.section_id);
+		if (isAlreadyCorrupted) {
+			const errorMessage = $corruptedDiagrams.get(diagram.section_id) || 'Unknown error';
+			containerRef.innerHTML = `
+				<div class="text-red-600 p-4 bg-red-50 rounded-lg border border-red-200">
+					<p class="font-semibold">❌ Mermaid rendering error</p>
+					<p class="text-sm mb-2 font-mono text-xs">${errorMessage}</p>
+					<p class="text-sm text-gray-600 mt-3">Click the "Fix" button in the left panel to automatically correct this diagram.</p>
+				</div>
+			`;
+		} else {
+			await renderDiagram();
+		}
 	});
 
 	// Re-render when diagram changes
 	$: if (diagram && diagram.section_id !== currentDiagramId) {
 		currentDiagramId = diagram.section_id;
-		renderDiagram();
+		// Check if this diagram is already marked as corrupted
+		const isCorrupted = get(corruptedDiagrams).has(diagram.section_id);
+		if (isCorrupted) {
+			const errorMessage = get(corruptedDiagrams).get(diagram.section_id) || 'Unknown error';
+			if (containerRef) {
+				containerRef.innerHTML = `
+					<div class="text-red-600 p-4 bg-red-50 rounded-lg border border-red-200">
+						<p class="font-semibold">❌ Mermaid rendering error</p>
+						<p class="text-sm mb-2 font-mono text-xs">${errorMessage}</p>
+						<p class="text-sm text-gray-600 mt-3">Click the "Fix" button in the left panel to automatically correct this diagram.</p>
+					</div>
+				`;
+			}
+		} else {
+			renderDiagram();
+		}
 	}
 
 	async function renderDiagram() {
 		if (!containerRef || !diagram?.diagram?.mermaid_code) return;
+
+		// IMPORTANT: Clear container immediately to prevent showing old diagram
+		containerRef.innerHTML = '<div class="text-gray-500">Rendering...</div>';
 
 		// Clean up existing panzoom
 		if (panzoomInstance) {
@@ -79,12 +111,30 @@
 
 			// Add click handlers to nodes and edges
 			addClickHandlers();
+			
+			// Clear from corrupted diagrams if render succeeds
+			corruptedDiagrams.update(map => {
+				const newMap = new Map(map);
+				newMap.delete(diagram.section_id);
+				return newMap;
+			});
 		} catch (error) {
 			console.error('Failed to render diagram:', error);
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			
+			// Track in corrupted diagrams store
+			corruptedDiagrams.update(map => {
+				const newMap = new Map(map);
+				newMap.set(diagram.section_id, errorMessage);
+				return newMap;
+			});
+			
+			// Show error message in viewer
 			containerRef.innerHTML = `
-				<div class="text-red-600 p-4">
-					<p class="font-semibold">Failed to render diagram</p>
-					<p class="text-sm">${error instanceof Error ? error.message : 'Unknown error'}</p>
+				<div class="text-red-600 p-4 bg-red-50 rounded-lg border border-red-200">
+					<p class="font-semibold">❌ Mermaid rendering error</p>
+					<p class="text-sm mb-2 font-mono text-xs">${errorMessage}</p>
+					<p class="text-sm text-gray-600 mt-3">Click the "Fix" button in the left panel to automatically correct this diagram.</p>
 				</div>
 			`;
 		}

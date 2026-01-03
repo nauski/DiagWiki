@@ -679,6 +679,143 @@ Create the diagram now:"""
     
     return prompt
 
+def build_diagram_correction_prompt(
+    section_title: str,
+    section_description: str,
+    diagram_type: str,
+    key_concepts: list,
+    rag_context: str,
+    retrieved_sources: str,
+    corrupted_diagram: str,
+    error_message: str,
+    language: str
+) -> str:
+    """
+    Build prompt to fix a corrupted Mermaid diagram that failed to render.
+    
+    This prompt provides explicit error correction context to help the LLM
+    understand what went wrong and generate a valid diagram.
+    
+    Args:
+        section_title: Title of the section
+        section_description: Description of the section
+        diagram_type: Type of diagram
+        key_concepts: Key concepts to include
+        rag_context: RAG-retrieved context
+        retrieved_sources: Retrieved source code snippets
+        corrupted_diagram: The broken Mermaid code
+        error_message: The error from Mermaid renderer
+        language: Target language code
+    
+    Returns:
+        Prompt string for LLM to fix the diagram
+    """
+    language_name = get_language_name(language)
+    key_concepts_str = "\n".join([f"  - {concept}" for concept in key_concepts])
+    
+    # Use the same diagram instructions from build_single_diagram_prompt
+    diagram_instructions = {
+        "flowchart": """- MUST start with: flowchart TD (top-down) or flowchart LR (left-right)
+- Use rectangles for processes, diamonds for decisions, rounded for start/end
+- Keep node labels concise (3-5 words max)
+- Critical! Wrap labels with special chars in quotes: A["Recall@10"] not A[Recall@10]
+- Or replace special chars with words: A[Recall at 10]
+- STYLING: Use minimal coloring - only emphasize critical nodes""",
+        "sequence": """- MUST start with: sequenceDiagram
+- Format: participant Name
+- Show message flow: Actor->>Target: message
+- Use activate/deactivate for lifelines""",
+        "class": """- MUST start with: classDiagram
+- Define classes: class ClassName { +method() }
+- Show relationships: Parent <|-- Child""",
+        "stateDiagram": """- MUST start with: stateDiagram-v2
+- Define states: state "Name" as id
+- Show transitions: id1 --> id2: event""",
+        "erDiagram": """- MUST start with: erDiagram
+- Define entities and relationships
+- Use ||--o{ for relationship types"""
+    }
+    
+    required_syntax = {
+        "flowchart": "flowchart TD",
+        "sequence": "sequenceDiagram",
+        "class": "classDiagram",
+        "stateDiagram": "stateDiagram-v2",
+        "erDiagram": "erDiagram"
+    }.get(diagram_type, "flowchart TD")
+    
+    instructions = diagram_instructions.get(diagram_type, diagram_instructions["flowchart"])
+    
+    prompt = f"""You are an expert at creating Mermaid diagrams for codebase visualization.
+
+A diagram you generated has a RENDERING ERROR. Your task is to FIX IT.
+
+SECTION INFORMATION:
+Title: {section_title}
+Description: {section_description}
+Diagram Type: {diagram_type}
+Key Concepts:
+{key_concepts_str}
+
+❌ ERROR THAT OCCURRED:
+{error_message}
+
+🔴 CORRUPTED DIAGRAM CODE:
+```mermaid
+{corrupted_diagram}
+```
+
+CODEBASE CONTEXT (from RAG):
+{rag_context}
+
+RETRIEVED SOURCE CODE:
+{retrieved_sources}
+
+YOUR TASK: Fix the diagram to make it render correctly in Mermaid.
+
+COMMON MERMAID ERRORS AND FIXES:
+1. **Special characters in labels** → Wrap in quotes: A["Recall@10"]
+2. **Missing diagram type declaration** → Start with: {required_syntax}
+3. **Invalid node IDs** → Use alphanumeric IDs (no spaces/special chars)
+4. **Syntax errors in arrows** → Use --> or ->> correctly
+5. **Unclosed subgraphs** → Ensure every subgraph has "end"
+6. **Invalid style syntax** → Check color codes and property names
+7. **Duplicate node IDs** → Make all IDs unique
+8. **Invalid characters** → Remove or escape @, #, %, etc. in labels
+
+DIAGRAM-SPECIFIC SYNTAX:
+{instructions}
+
+INSTRUCTIONS:
+1. Analyze the error message and identify the issue
+2. Fix the syntax error while preserving the diagram's intent
+3. Ensure the diagram is valid Mermaid syntax
+4. Keep the same key concepts and structure
+5. Add comprehensive node and edge explanations
+
+Return your response in JSON format:
+
+{{
+  "mermaid_code": "{required_syntax}\\n  ...",
+  "diagram_description": "Brief explanation of the fixed diagram",
+  "node_explanations": {{
+    "NodeID": "What this node represents"
+  }},
+  "edge_explanations": {{
+    "Source->Target": "What this connection means"
+  }}
+}}
+
+CRITICAL:
+- Return ONLY valid JSON (no markdown code blocks)
+- Escape newlines as \\n
+- Test the syntax mentally before returning
+- Make sure it starts with: {required_syntax}
+
+Generate in {language_name} language. Fix the diagram now:"""
+    
+    return prompt
+
 def build_wiki_question_prompt(
     question: str,
     wiki_context: str,

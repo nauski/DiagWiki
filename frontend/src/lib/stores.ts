@@ -31,6 +31,9 @@ export const availableSections = writable<Map<string, Set<WikiSection>>>(new Map
 // Failed sections that need retry
 export const failedSections = writable<Map<string, Set<string>>>(new Map());
 
+// Diagrams that rendered with errors (section_id -> error message)
+export const corruptedDiagrams = writable<Map<string, string>>(new Map());
+
 // Currently open diagram tabs
 export const openTabs = writable<DiagramSection[]>([]);
 

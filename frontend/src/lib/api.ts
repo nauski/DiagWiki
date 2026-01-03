@@ -64,6 +64,36 @@ export async function generateSectionDiagram(rootPath: string, section: any, ref
 	return await response.json();
 }
 
+export async function fixCorruptedDiagram(
+	rootPath: string,
+	section: any,
+	corruptedDiagram: string,
+	errorMessage: string
+) {
+	const response = await fetch(`${API_BASE}/fixCorruptedDiagram`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			root_path: rootPath,
+			section_id: section.section_id,
+			section_title: section.section_title,
+			section_description: section.section_description,
+			diagram_type: section.diagram_type,
+			key_concepts: section.key_concepts || [],
+			language: 'en',
+			corrupted_diagram: corruptedDiagram,
+			error_message: errorMessage
+		})
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to fix diagram: ${errorText || response.statusText}`);
+	}
+
+	return await response.json();
+}
+
 export async function queryWikiProblem(rootPath: string, prompt: string) {
 	const response = await fetch(`${API_BASE}/wikiProblem`, {
 		method: 'POST',
