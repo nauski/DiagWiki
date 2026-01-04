@@ -600,6 +600,54 @@ class WikiGenerator:
                 "raw_response": response_text[:500]
             }
     
+    def _add_custom_section_to_sections_cache(self, result: Dict):
+        """Add a custom section to the sections cache file so it appears in left panel."""
+        try:
+            repo_name = os.path.basename(self.root_path)
+            page_id = repo_name.lower().replace(' ', '_').replace('/', '_')
+            sections_file = os.path.join(self.cache.diagrams_dir, f"{page_id}_sections.json")
+            
+            # Create new section metadata
+            new_section = {
+                "section_id": result['section_id'],
+                "section_title": result['section_title'],
+                "section_description": result.get('section_description', result['section_title']),
+                "diagram_type": result['diagram'].get('diagram_type', 'flowchart'),
+                "key_concepts": []
+            }
+            
+            # Load existing sections or create new file
+            if os.path.exists(sections_file):
+                with open(sections_file, 'r', encoding='utf-8') as f:
+                    sections_data = json.load(f)
+            else:
+                sections_data = {
+                    "status": "success",
+                    "repo_name": repo_name,
+                    "language": "en",
+                    "sections": [],
+                    "cached": False
+                }
+            
+            # Check if this custom section already exists
+            sections = sections_data.get('sections', [])
+            existing_ids = [s['section_id'] for s in sections]
+            
+            if new_section['section_id'] not in existing_ids:
+                sections.append(new_section)
+                sections_data['sections'] = sections
+                
+                # Save updated sections
+                with open(sections_file, 'w', encoding='utf-8') as f:
+                    json.dump(sections_data, f, indent=2, ensure_ascii=False)
+                
+                logger.info(f"✅ Added custom section to cache: {new_section['section_id']}")
+            else:
+                logger.info(f"ℹ️  Custom section already in cache: {new_section['section_id']}")
+                
+        except Exception as e:
+            logger.error(f"Failed to add custom section to cache: {e}", exc_info=True)
+    
     def create_wiki_section(
         self,
         wiki_name: str,
@@ -725,6 +773,9 @@ class WikiGenerator:
                 mermaid_file = os.path.join(self.cache.diagrams_dir, f"diag_{wiki_name}.mmd")
                 with open(mermaid_file, 'w', encoding='utf-8') as f:
                     f.write(mermaid_code)
+                
+                # Add custom section to sections cache (so it appears in left panel)
+                self._add_custom_section_to_sections_cache(result)
                 
                 # Add to wiki RAG database
                 try:

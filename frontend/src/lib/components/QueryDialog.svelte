@@ -152,8 +152,31 @@
 		
 		// Generate and wait for completion
 		try {
-			const referenceFiles = referenceMode === 'manual' ? selectedFiles : undefined;
-			const diagram = await generateSectionDiagram(projectPath, sectionToGenerate, referenceFiles);
+			let diagram;
+			
+			if (isNewCustomSection) {
+				// For custom diagrams, use the create wiki endpoint
+				const response = await fetch('http://localhost:8001/modifyOrCreateWiki', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						root_path: projectPath,
+						next_step_prompt: prompt,
+						wiki_name: sectionToGenerate.section_id,
+						is_new: true
+					})
+				});
+				
+				if (!response.ok) {
+					throw new Error(`Failed to create custom diagram: ${response.statusText}`);
+				}
+				
+				diagram = await response.json();
+			} else {
+				// For existing sections, use regular generation
+				const referenceFiles = referenceMode === 'manual' ? selectedFiles : undefined;
+				diagram = await generateSectionDiagram(projectPath, sectionToGenerate, referenceFiles);
+			}
 			
 			// Add to frontend cache
 			diagramCache.update(cache => {
@@ -170,8 +193,11 @@
 					const projectSections = newMap.get($currentProject) || [];
 					if (!projectSections.some(s => s.section_id === sectionToGenerate.section_id)) {
 						const updatedSection = {
-							...sectionToGenerate,
-							section_title: diagram.section_title || sectionToGenerate.section_title
+							section_id: diagram.section_id,
+							section_title: diagram.section_title,
+							section_description: diagram.section_description,
+							diagram_type: diagram.diagram?.diagram_type || 'flowchart',
+							key_concepts: []
 						};
 						newMap.set($currentProject, [...projectSections, updatedSection]);
 					}

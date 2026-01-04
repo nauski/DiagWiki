@@ -497,6 +497,12 @@ class FixDiagramRequest(BaseModel):
     error_message: str = Field(..., description="The Mermaid rendering error message")
 
 
+class UpdateDiagramRequest(BaseModel):
+    root_path: str = Field(..., description="Root path to the folder")
+    section_id: str = Field(..., description="Section ID of the diagram to update")
+    mermaid_code: str = Field(..., description="Updated Mermaid diagram code")
+
+
 @app.post("/identifyDiagramSections")
 async def identify_diagram_sections(request: DiagramSectionsRequest = Body(...)):
     """
@@ -716,6 +722,93 @@ def _fix_diagram_sync(
         corrupted_diagram=corrupted_diagram,
         error_message=error_message
     )
+
+
+@app.post("/updateDiagram")
+async def update_diagram(request: UpdateDiagramRequest = Body(...)):
+    """
+    Update a diagram with manually edited Mermaid code.
+    
+    This endpoint validates and saves user-edited Mermaid code, re-parsing
+    the diagram structure and updating the cache files.
+    
+    Args:
+        request: UpdateDiagramRequest with updated mermaid code
+        
+    Returns:
+        JSON with updated diagram data
+    """
+    try:
+        logger.info(f"Updating diagram for section: {request.section_id}")
+        
+        # Validate folder
+        if not os.path.exists(request.root_path):
+            raise HTTPException(status_code=404, detail=f"Folder not found: {request.root_path}")
+        
+        # Run blocking operation in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            executor,
+            _update_diagram_sync,
+            request.root_path,
+            request.section_id,
+            request.mermaid_code
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating diagram: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update diagram: {str(e)}")
+
+
+def _update_diagram_sync(root_path: str, section_id: str, mermaid_code: str):
+    """Synchronous function to update diagram - only updates mermaid code."""
+    from utils.mermaid_parser import validate_mermaid_syntax
+    
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    wiki_gen = WikiGenerator(root_path=root_path, data_dir=data_dir)
+    
+    # Validate the new mermaid code
+    is_valid, validation_msg = validate_mermaid_syntax(mermaid_code)
+    
+    if not is_valid:
+        return {
+            "status": "error",
+            "error": f"Invalid Mermaid syntax: {validation_msg}",
+            "mermaid_code": mermaid_code
+        }
+    
+    # Load existing diagram data
+    cache_file = os.path.join(wiki_gen.cache.diagrams_dir, f"diag_{section_id}.json")
+    mermaid_file = os.path.join(wiki_gen.cache.diagrams_dir, f"diag_{section_id}.mmd")
+    
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            existing_data = json.load(f)
+    else:
+        return {
+            "status": "error",
+            "error": f"Diagram not found: {section_id}"
+        }
+    
+    # Update only the mermaid code
+    existing_data['diagram']['mermaid_code'] = mermaid_code
+    existing_data['diagram']['is_valid'] = True
+    existing_data['cached'] = False
+    
+    # Save updated files
+    with open(cache_file, 'w', encoding='utf-8') as f:
+        json.dump(existing_data, f, indent=2, ensure_ascii=False)
+    
+    with open(mermaid_file, 'w', encoding='utf-8') as f:
+        f.write(mermaid_code)
+    
+    logger.info(f"✅ Updated diagram code: {section_id}")
+    
+    return existing_data
 
 
 # Pydantic models for wiki problem analysis and modification

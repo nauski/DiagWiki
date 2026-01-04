@@ -94,6 +94,25 @@ export async function fixCorruptedDiagram(
 	return await response.json();
 }
 
+export async function updateDiagram(rootPath: string, sectionId: string, mermaidCode: string) {
+	const response = await fetch(`${API_BASE}/updateDiagram`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			root_path: rootPath,
+			section_id: sectionId,
+			mermaid_code: mermaidCode
+		})
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to update diagram: ${errorText || response.statusText}`);
+	}
+
+	return await response.json();
+}
+
 export async function queryWikiProblem(rootPath: string, prompt: string) {
 	const response = await fetch(`${API_BASE}/wikiProblem`, {
 		method: 'POST',

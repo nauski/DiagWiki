@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { onMount, onDestroy, afterUpdate, tick } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import type { DiagramSection } from '$lib/types';
-	import { selectedElement, rightPanelOpen, corruptedDiagrams } from '$lib/stores';
+	import { selectedElement, rightPanelOpen, corruptedDiagrams, diagramCache, openTabs, currentProject } from '$lib/stores';
 	import { get } from 'svelte/store';
 	import mermaid from 'mermaid';
 	import panzoom from 'panzoom';
 	import { jsPDF } from 'jspdf';
+	import { updateDiagram } from '$lib/api';
 
 	export let diagram: DiagramSection;
 
@@ -18,6 +19,12 @@
 	let renderCount = 0;
 	let zoomLevel = 1;
 	let showExportModal = false;
+	let copySuccess = false;
+	let showRawCodeModal = false;
+	let editedCode = '';
+	let isUpdating = false;
+	let updateError = '';
+	let updateSuccess = false;
 
 	type ExportFormat = 'svg' | 'png' | 'jpg' | 'pdf';
 
@@ -49,6 +56,14 @@
 	$: if (diagram && (diagram.section_id !== currentDiagramId || diagram.diagram?.mermaid_code !== currentDiagramCode)) {
 		currentDiagramId = diagram.section_id;
 		currentDiagramCode = diagram.diagram?.mermaid_code || '';
+		
+		// Update edited code if raw code modal is open
+		if (showRawCodeModal) {
+			editedCode = unescapeMermaidCode(currentDiagramCode);
+			updateError = '';
+			updateSuccess = false;
+		}
+		
 		// Check if this diagram is already marked as corrupted
 		const isCorrupted = get(corruptedDiagrams).has(diagram.section_id);
 		
@@ -434,6 +449,83 @@
 			containerRef.innerHTML = '';
 		}
 	});
+
+	function unescapeMermaidCode(code: string): string {
+		if (!code) return '';
+		// Replace escaped newlines with actual newlines
+		return code.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+	}
+
+	function toggleRawCodeModal() {
+		showRawCodeModal = !showRawCodeModal;
+		if (showRawCodeModal) {
+			editedCode = unescapeMermaidCode(diagram?.diagram?.mermaid_code || '');
+			updateError = '';
+			updateSuccess = false;
+		} else {
+			copySuccess = false;
+		}
+	}
+
+	async function copyToClipboard() {
+		if (!diagram?.diagram?.mermaid_code) return;
+		
+		try {
+			await navigator.clipboard.writeText(diagram.diagram.mermaid_code);
+			copySuccess = true;
+			setTimeout(() => {
+				copySuccess = false;
+			}, 2000);
+		} catch (err) {
+			console.error('Failed to copy:', err);
+		}
+	}
+
+	async function handleUpdateDiagram() {
+		if (!editedCode || !$currentProject) return;
+		
+		isUpdating = true;
+		updateError = '';
+		updateSuccess = false;
+		
+		try {
+			const result = await updateDiagram($currentProject, diagram.section_id, editedCode);
+			
+			if (result.status === 'success') {
+				// Update all stores
+				diagramCache.update(cache => {
+					cache.set(diagram.section_id, result);
+					return cache;
+				});
+				
+				openTabs.update(tabs => {
+					const index = tabs.findIndex(t => t.section_id === diagram.section_id);
+					if (index !== -1) {
+						tabs[index] = result;
+					}
+					return tabs;
+				});
+				
+				// Remove from corrupted diagrams if it was there
+				corruptedDiagrams.update(corrupted => {
+					corrupted.delete(diagram.section_id);
+					return corrupted;
+				});
+				
+				updateSuccess = true;
+				setTimeout(() => {
+					updateSuccess = false;
+					showRawCodeModal = false;
+				}, 1500);
+			} else {
+				updateError = result.error || 'Failed to update diagram';
+			}
+		} catch (err) {
+			updateError = err instanceof Error ? err.message : 'Failed to update diagram';
+		} finally {
+			isUpdating = false;
+		}
+	}
 </script>
 
 <div class="h-full w-full flex flex-col bg-white">
@@ -485,8 +577,94 @@
 		</div>
 	</div>
 
-	<div class="flex-1 overflow-auto relative bg-gray-50">
-		<div bind:this={containerRef} class="mermaid-container w-full h-full"></div>
+	<div class="flex-1 relative bg-gray-50">
+		<div bind:this={containerRef} class="mermaid-container w-full h-full overflow-auto"></div>
+		
+		<!-- Raw Code button in top-right corner -->
+		<button
+			on:click={toggleRawCodeModal}
+			class="absolute top-4 right-4 px-3 py-1.5 bg-white hover:bg-gray-100 rounded border border-gray-300 shadow-sm transition-colors text-sm font-medium text-gray-700 z-10"
+			title="View raw Mermaid code"
+		>
+			Raw Code
+		</button>
+		
+		<!-- Raw Code floating panel with animation -->
+		{#if showRawCodeModal}
+			<div 
+				class="absolute top-16 right-4 w-[600px] max-w-[calc(100%-2rem)] bg-white rounded-lg shadow-2xl border border-gray-300 flex flex-col z-20 animate-expand"
+				style="height: 60vh; max-height: calc(100vh - 10rem);"
+			>
+				<div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+					<h3 class="text-sm font-semibold text-gray-900">Raw Mermaid Code</h3>
+					<div class="flex items-center gap-2">
+						<button
+							on:click={copyToClipboard}
+							class="p-1.5 hover:bg-gray-100 rounded transition-colors"
+							title="Copy to clipboard"
+						>
+							{#if copySuccess}
+								<svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+								</svg>
+							{:else}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+								</svg>
+							{/if}
+						</button>
+						<button
+							on:click={toggleRawCodeModal}
+							class="p-1.5 hover:bg-gray-100 rounded transition-colors"
+							title="Close"
+						>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
+					</div>
+				</div>
+				
+				<div class="flex-1 overflow-auto bg-gray-50">
+					<textarea
+						bind:value={editedCode}
+						class="w-full h-full p-4 text-xs font-mono text-gray-800 bg-gray-50 border-none resize-none focus:outline-none focus:ring-0"
+						placeholder="Enter Mermaid code..."
+						spellcheck="false"
+					></textarea>
+				</div>
+				
+				{#if updateError}
+					<div class="px-4 py-2 bg-red-50 border-t border-red-200 text-xs text-red-600">
+						{updateError}
+					</div>
+				{/if}
+				
+				<div class="px-4 py-3 border-t border-gray-200 flex gap-2">
+					<button
+						on:click={handleUpdateDiagram}
+						disabled={isUpdating || !editedCode || editedCode === diagram?.diagram?.mermaid_code}
+						class="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded font-medium text-sm transition-colors flex items-center justify-center gap-2"
+					>
+						{#if isUpdating}
+							<svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+							Updating...
+						{:else if updateSuccess}
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+							</svg>
+							Updated!
+						{:else}
+							Update
+						{/if}
+					</button>
+				</div>
+			</div>
+		{/if}
+		
 		<div class="absolute bottom-4 left-4 text-xs text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
 			Drag to pan • Scroll to zoom • Click elements for details
 		</div>
@@ -548,6 +726,21 @@
 	:global(.mermaid-container svg) {
 		max-width: 100%;
 		height: auto;
+	}
+
+	.animate-expand {
+		animation: expand 0.2s ease-out;
+	}
+
+	@keyframes expand {
+		from {
+			opacity: 0;
+			transform: scale(0.95) translateY(-10px);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
 	}
 
 	/* Removed global hover styles - handled in JavaScript for precision */
