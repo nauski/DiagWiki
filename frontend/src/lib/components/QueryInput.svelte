@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentProject, identifiedSections } from '$lib/stores';
+	import { currentProject, identifiedSections, diagramCache, openTabs, generatedDiagrams } from '$lib/stores';
 	import { queryWikiProblem, generateSectionDiagram } from '$lib/api';
 
 	let query = '';
@@ -52,6 +52,54 @@
 					});
 					if (!response.ok) {
 						console.error(`Failed to modify ${mod.wiki_name}`);
+					} else {
+						const diagram = await response.json();
+						
+						// Update identifiedSections store with new details
+						identifiedSections.update(map => {
+							if (!$currentProject) return map;
+							if (!map.has($currentProject)) return map;
+							const newMap = new Map(map);
+							const projectSections = newMap.get($currentProject) || [];
+							const updatedSections = projectSections.map(s => {
+								if (s.section_id === diagram.section_id) {
+									return {
+										section_id: diagram.section_id,
+										section_title: diagram.section_title,
+										section_description: diagram.section_description,
+										diagram_type: diagram.diagram?.diagram_type || 'flowchart',
+										key_concepts: s.key_concepts || []
+									};
+								}
+								return s;
+							});
+							newMap.set($currentProject, updatedSections);
+							return newMap;
+						});
+						
+						// CRITICAL: Update cache with new diagram data
+						diagramCache.update(cache => {
+							const newCache = new Map(cache);
+							newCache.set(diagram.section_id, diagram);
+							return newCache;
+						});
+						
+						// CRITICAL: Update open tab if it exists
+						const tabIndex = $openTabs.findIndex(t => t.section_id === diagram.section_id);
+						if (tabIndex !== -1) {
+							openTabs.update(tabs => {
+								const newTabs = [...tabs];
+								newTabs[tabIndex] = diagram;
+								return newTabs;
+							});
+						}
+						
+						// Mark as generated
+						generatedDiagrams.update(set => {
+							const newSet = new Set(set);
+							newSet.add(diagram.section_id);
+							return newSet;
+						});
 					}
 				} catch (err) {
 					console.error(`Error modifying ${mod.wiki_name}:`, err);
@@ -90,6 +138,20 @@
 								}]);
 							}
 							return newMap;
+						});
+
+						// CRITICAL: Add to cache
+						diagramCache.update(cache => {
+							const newCache = new Map(cache);
+							newCache.set(diagram.section_id, diagram);
+							return newCache;
+						});
+						
+						// Mark as generated
+						generatedDiagrams.update(set => {
+							const newSet = new Set(set);
+							newSet.add(diagram.section_id);
+							return newSet;
 						});
 					}
 				} catch (err) {

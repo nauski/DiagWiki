@@ -337,8 +337,8 @@ class WikiDiagramGenerator:
         source_files = []
         seen_paths = set()
         for doc in all_retrieved_docs:
-            if hasattr(doc, 'meta_data'):
-                file_path = doc.meta_data.get('file_path', '')
+            if hasattr(doc, 'file_path'):
+                file_path = doc.file_path
                 if file_path and file_path not in seen_paths:
                     seen_paths.add(file_path)
                     source_files.append({

@@ -272,15 +272,6 @@
 		}
 		return paths;
 	}
-
-	function toggleFolder(folderPath: string) {
-		if (expandedFolders.has(folderPath)) {
-			expandedFolders.delete(folderPath);
-		} else {
-			expandedFolders.add(folderPath);
-		}
-		expandedFolders = expandedFolders;
-	}
 </script>
 
 <div class="h-full flex flex-col bg-gray-50">

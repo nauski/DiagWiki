@@ -757,6 +757,12 @@ def build_diagram_correction_prompt(
     ]
     
     common_errors_flowchart = [
+        """**@ symbol in node labels** → CRITICAL! The @ character BREAKS Mermaid parsing
+   - ERROR: `D[Recall@10]` causes "Parse error... got 'LINK_ID'"
+   - FIX: Wrap label in quotes: `D["Recall@10"]`
+   - OR: Replace @ with words: `D[Recall at 10]`
+   - This applies to ALL special chars: @, #, %, $, &, etc.
+   - ALWAYS check for @ symbols and quote them!""",
         "**Syntax errors in arrows** → Use --> or ->> correctly",
         "**Unclosed subgraphs** → Ensure every subgraph has \"end\"",
         "**Invalid style syntax** → Check color codes and property names",
@@ -774,8 +780,53 @@ def build_diagram_correction_prompt(
      a) `deactivate` inside alt/else branch AND after `end`
      b) `deactivate` without matching `activate`
      c) Calling `deactivate` twice for the same participant
-   - FIX: Count each `activate` and `deactivate` - they must match 1:1
-   - SOLUTION: Either add missing `activate` or remove extra `deactivate`"""
+   
+   ⚠️ MANDATORY FIX ALGORITHM - FOLLOW THESE STEPS EXACTLY:
+   
+   STEP 1: Extract ALL participants from the diagram
+     - List every participant name (A, B, Client, Server, etc.)
+   
+   STEP 2: For EACH participant, create a checklist:
+     Participant: [Name]
+       - Count of `activate [Name]`: [number]
+       - Count of `deactivate [Name]`: [number]
+       - Status: [EQUAL or MISMATCH]
+   
+   STEP 3: For each MISMATCH, identify the fix:
+     - If more deactivate than activate → Remove extra deactivate statements
+       * Common pattern: deactivate inside alt/else branch AND after end
+       * Fix: Keep only the deactivate AFTER the end block
+     - If more activate than deactivate → Add missing deactivate statements
+       * Add deactivate at the end of the participant's lifecycle
+   
+   STEP 4: Common wrong patterns and their fixes:
+     ❌ WRONG:
+     ```
+     alt Valid
+       A->>B: success
+     else Invalid
+       A->>B: error
+       deactivate A  ← inside else block
+     end
+     deactivate A  ← after end (DOUBLE!)
+     ```
+     
+     ✅ RIGHT:
+     ```
+     alt Valid
+       A->>B: success
+     else Invalid
+       A->>B: error
+     end
+     deactivate A  ← Only ONE, after end
+     ```
+   
+   STEP 5: VERIFY BEFORE RETURNING - For each participant:
+     - activate count MUST EQUAL deactivate count
+     - If not equal, go back to STEP 3 and fix it
+     
+   ⚠️ CRITICAL: IF YOU RETURN CODE WHERE COUNTS ARE NOT EQUAL, YOU HAVE FAILED!
+   DO NOT RETURN THE SAME BROKEN CODE. YOUR FIXED CODE MUST HAVE EQUAL COUNTS FOR ALL PARTICIPANTS."""
     ]
     
     common_errors_class = [
