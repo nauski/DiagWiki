@@ -107,6 +107,9 @@ class Const:
     # Default top_k for RAG queries
     RAG_TOP_K = 40
     
+    # Special top_k for section identification iterations (higher to get comprehensive view)
+    RAG_SECTION_ITERATION_TOP_K = 80
+    
     # Maximum tokens for document chunking
     MAX_TOKEN_LIMIT = 8192
     

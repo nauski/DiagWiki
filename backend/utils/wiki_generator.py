@@ -408,7 +408,8 @@ class WikiGenerator:
         section_title: str,
         section_description: str,
         diagram_type: str,
-        key_concepts: List[str],
+        key_concepts: List[str] = None,
+        file_references: str = None,
         language: str = "en",
         use_cache: bool = True,
         reference_files: List[str] = None
@@ -418,12 +419,14 @@ class WikiGenerator:
         Delegates to WikiDiagramGenerator module.
         
         Args:
+            key_concepts: (Optional) List of key concepts (legacy format)
+            file_references: (Optional) Detailed file analysis string (new format from iteration 3)
             reference_files: Optional list of file paths to use as reference (bypasses RAG)
         """
         self.initialize_rag()
         return self.diagram_generator.generate_section_diagram(
             section_id, section_title, section_description,
-            diagram_type, key_concepts, language, use_cache, reference_files
+            diagram_type, key_concepts, file_references, language, use_cache, reference_files
         )
     
     def fix_corrupted_diagram(
@@ -432,10 +435,11 @@ class WikiGenerator:
         section_title: str,
         section_description: str,
         diagram_type: str,
-        key_concepts: List[str],
-        language: str,
-        corrupted_diagram: str,
-        error_message: str
+        key_concepts: List[str] = None,
+        file_references: str = None,
+        language: str = "en",
+        corrupted_diagram: str = "",
+        error_message: str = ""
     ) -> Dict:
         """
         Fix a corrupted Mermaid diagram that failed to render.
@@ -445,7 +449,8 @@ class WikiGenerator:
             section_title: Title of the section
             section_description: Description of the section
             diagram_type: Type of diagram
-            key_concepts: List of key concepts
+            key_concepts: (Optional) List of key concepts (legacy format)
+            file_references: (Optional) Detailed file analysis string (new format from iteration 3)
             language: Language code
             corrupted_diagram: The corrupted Mermaid code
             error_message: The error message from Mermaid
@@ -456,7 +461,7 @@ class WikiGenerator:
         self.initialize_rag()
         return self.diagram_generator.fix_corrupted_diagram(
             section_id, section_title, section_description,
-            diagram_type, key_concepts, language,
+            diagram_type, key_concepts, file_references, language,
             corrupted_diagram, error_message
         )
     

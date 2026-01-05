@@ -14,7 +14,9 @@ from adalflow.core.types import ModelType
 from const.const import Const, get_llm_client
 from const.prompts import (
     build_page_analysis_queries,
-    build_diagram_sections_prompt,
+    build_diagram_sections_prompt_iteration1,
+    build_diagram_sections_prompt_iteration2,
+    build_diagram_sections_prompt_iteration3,
     build_single_diagram_prompt,
     build_section_rag_query
 )
@@ -47,6 +49,11 @@ class WikiDiagramGenerator:
         """
         Step 1: Identify diagram sections for the codebase (Diagram-First Wiki).
         
+        Uses 3-iteration approach:
+        1. Rough section identification from RAG context
+        2. Refinement with detailed code files
+        3. File assignment to each section
+        
         This is for a DIAGRAM-FIRST WIKI - diagrams ARE the content, not supplements.
         Analyzes the codebase and identifies diagram sections that together explain it.
         The number of sections is determined by the LLM based on codebase complexity.
@@ -56,7 +63,7 @@ class WikiDiagramGenerator:
             use_cache: Whether to use cached sections if available
         
         Returns:
-            Dict with status and identified sections list
+            Dict with status and identified sections list (with file_references)
         """
         # Use repo name as page_id for caching
         repo_name = os.path.basename(self.root_path)
@@ -77,18 +84,22 @@ class WikiDiagramGenerator:
         if self.rag is None:
             raise RuntimeError("RAG not initialized. Call initialize_rag() first.")
         
+        # ==================== ITERATION 1: ROUGH SECTION IDENTIFICATION ====================
+        logger.info("🎯 ITERATION 1: Identifying rough sections from RAG context...")
+        
         # Generate RAG queries
         rag_queries = build_page_analysis_queries(repo_name, "Identify key components and workflows suitable for diagrammatic representation.")
         
         # Perform RAG queries
         logger.info(f"Performing {len(rag_queries)} RAG queries for: {repo_name}")
         rag_results = []
+        all_retrieved_docs = []
         
         for query in rag_queries:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=Const.RAG_TOP_K,
+                    top_k=Const.RAG_SECTION_ITERATION_TOP_K,  # Use higher top_k for section identification
                     use_reranking=True
                 )
                 rag_results.append({
@@ -96,25 +107,138 @@ class WikiDiagramGenerator:
                     "answer": answer.answer,
                     "rationale": answer.rationale
                 })
+                all_retrieved_docs.extend(retrieved_docs)
                 logger.info(f"RAG query completed: {query[:60]}...")
             except Exception as e:
                 logger.warning(f"RAG query failed for '{query[:50]}...': {e}")
         
-        # Build RAG context
+        # Build RAG context (rationale and content only, no raw code)
         rag_context = "\n\n".join([
             f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
             for r in rag_results
         ])
         
-        # Step 1: Identify diagram sections
-        logger.info("Identifying diagram sections...")
-        sections_prompt = build_diagram_sections_prompt(
+        # Call iteration 1
+        iteration1_prompt = build_diagram_sections_prompt_iteration1(
             repo_name=repo_name,
             rag_context=rag_context,
             language=language
         )
         
-        # Use get_llm_client() for proper timeout configuration
+        rough_sections = self._call_llm_for_sections(iteration1_prompt, "iteration 1")
+        if not rough_sections:
+            logger.error("Iteration 1 failed to identify sections")
+            return {"status": "error", "error": "Failed to identify rough sections"}
+        
+        logger.info(f"Iteration 1 complete: {len(rough_sections)} rough sections identified")
+        
+        # ==================== ITERATION 2: REFINE WITH CODE FILES ====================
+        logger.info("🎯 ITERATION 2: Refining sections with detailed code files...")
+        
+        # Do additional comprehensive RAG query specifically for iteration 2
+        # This gives the LLM access to more source code for better refinement
+        comprehensive_query = f"Provide a comprehensive overview of the {repo_name} codebase structure, main components, architecture, and key files."
+        try:
+            logger.info(f"Performing comprehensive RAG query for iteration 2 with top_k={Const.RAG_SECTION_ITERATION_TOP_K}")
+            answer, comprehensive_docs = self.rag.call(
+                query=comprehensive_query,
+                top_k=Const.RAG_SECTION_ITERATION_TOP_K,  # Higher top_k for comprehensive view
+                use_reranking=True
+            )
+            all_retrieved_docs.extend(comprehensive_docs)
+            logger.info(f"Comprehensive RAG query retrieved {len(comprehensive_docs)} additional documents")
+        except Exception as e:
+            logger.warning(f"Comprehensive RAG query failed: {e}")
+        
+        # Extract unique file paths and collect code snippets
+        code_files_map = {}
+        for doc in all_retrieved_docs:
+            if hasattr(doc, 'meta_data'):
+                file_path = doc.meta_data.get('file_path', '')
+                if file_path and file_path not in code_files_map:
+                    # Get text content with longer preview for better understanding
+                    doc_text = doc.text if hasattr(doc, 'text') else str(doc)
+                    code_files_map[file_path] = doc_text[:1000]  # Increased to 1000 chars
+        
+        logger.info(f"Collected {len(code_files_map)} unique code files for iteration 2")
+        
+        # Format code files content - include more files (top 40)
+        code_files_content = "\n\n".join([
+            f"File: {path}\n{content}..."
+            for path, content in list(code_files_map.items())[:40]  # Increased to top 40 files
+        ])
+        
+        # Call iteration 2
+        iteration2_prompt = build_diagram_sections_prompt_iteration2(
+            repo_name=repo_name,
+            rough_sections=rough_sections,
+            code_files_content=code_files_content,
+            language=language
+        )
+        
+        iteration2_response = self._call_llm_for_sections(iteration2_prompt, "iteration 2", return_full=True)
+        if not iteration2_response or 'sections' not in iteration2_response:
+            logger.error("Iteration 2 failed to refine sections")
+            return {"status": "error", "error": "Failed to refine sections"}
+        
+        refined_sections = iteration2_response['sections']
+        refinement_notes = iteration2_response.get('refinement_notes', '')
+        
+        logger.info(f"Iteration 2 complete: {len(refined_sections)} refined sections")
+        if refinement_notes:
+            logger.info(f"Refinement notes: {refinement_notes[:200]}...")
+        
+        # ==================== ITERATION 3: ASSIGN FILES TO SECTIONS ====================
+        logger.info("🎯 ITERATION 3: Assigning code files to sections...")
+        
+        # Get all available file paths
+        all_code_files = list(code_files_map.keys())
+        
+        # Call iteration 3
+        iteration3_prompt = build_diagram_sections_prompt_iteration3(
+            repo_name=repo_name,
+            refined_sections=refined_sections,
+            all_code_files=all_code_files,
+            language=language
+        )
+        
+        final_response = self._call_llm_for_sections(iteration3_prompt, "iteration 3", return_full=True)
+        if not final_response or 'sections' not in final_response:
+            logger.error("Iteration 3 failed to assign files")
+            return {"status": "error", "error": "Failed to assign files to sections"}
+        
+        final_sections = final_response['sections']
+        
+        logger.info(f"Iteration 3 complete: {len(final_sections)} final sections with file assignments")
+        
+        # Cache the result
+        cache_file = os.path.join(self.cache.diagrams_dir, f"{page_id}_sections.json")
+        
+        result = {
+            "status": "success",
+            "repo_name": repo_name,
+            "language": language,
+            "sections": final_sections,
+            "rag_queries_performed": len(rag_queries),
+            "iteration_notes": {
+                "iteration1_count": len(rough_sections),
+                "iteration2_count": len(refined_sections),
+                "iteration3_count": len(final_sections),
+                "refinement_notes": refinement_notes
+            },
+            "cached": False,
+            "cache_file": cache_file
+        }
+        
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"💾 Cached sections to: {cache_file}")
+        
+        return result
+    
+    def _call_llm_for_sections(self, prompt: str, iteration_name: str, return_full: bool = False) -> any:
+        """Helper method to call LLM for section identification iterations."""
         model = get_llm_client()
         model_kwargs = {
             "model": Const.GENERATION_MODEL,
@@ -123,11 +247,11 @@ class WikiDiagramGenerator:
                 "temperature": Const.DEFAULT_TEMPERATURE,
                 "num_ctx": Const.LARGE_CONTEXT_WINDOW
             },
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
+            "keep_alive": Const.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=sections_prompt,
+            input=prompt,
             model_kwargs=model_kwargs,
             model_type=ModelType.LLM
         )
@@ -142,31 +266,13 @@ class WikiDiagramGenerator:
         
         try:
             sections_data = json.loads(sections_json)
-            identified_sections = sections_data.get('sections', [])
-            logger.info(f"Identified {len(identified_sections)} sections for diagrams")
+            if return_full:
+                return sections_data
+            else:
+                return sections_data.get('sections', [])
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse sections JSON: {e}")
-            identified_sections = []
-        
-        # Cache the result
-        cache_file = os.path.join(self.cache.diagrams_dir, f"{page_id}_sections.json")
-        
-        result = {
-            "status": "success",
-            "repo_name": repo_name,
-            "language": language,
-            "sections": identified_sections,
-            "rag_queries_performed": len(rag_queries),
-            "cached": False,
-            "cache_file": cache_file
-        }
-        
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"💾 Cached sections to: {cache_file}")
-        
-        return result
+            logger.error(f"Failed to parse {iteration_name} JSON: {e}")
+            return None if return_full else []
     
     def generate_section_diagram(
         self,
@@ -174,7 +280,8 @@ class WikiDiagramGenerator:
         section_title: str,
         section_description: str,
         diagram_type: str,
-        key_concepts: List[str],
+        key_concepts: List[str] = None,
+        file_references: str = None,
         language: str = "en",
         use_cache: bool = True,
         reference_files: List[str] = None
@@ -189,7 +296,8 @@ class WikiDiagramGenerator:
             section_title: Title of this section
             section_description: Description of what this section covers
             diagram_type: Type of Mermaid diagram (flowchart, sequence, etc.)
-            key_concepts: List of key concepts to include
+            key_concepts: (Optional) List of key concepts to include (legacy format)
+            file_references: (Optional) Detailed file analysis string (new format from iteration 3)
             language: Target language code
             use_cache: Whether to use cached diagram if available
             reference_files: Optional list of file paths to use as reference (bypasses RAG)
@@ -233,6 +341,7 @@ class WikiDiagramGenerator:
                 section_title=section_title,
                 section_description=section_description,
                 key_concepts=key_concepts,
+                file_references=file_references,
                 diagram_type=diagram_type
             )
         
@@ -243,6 +352,7 @@ class WikiDiagramGenerator:
             section_description=section_description,
             diagram_type=diagram_type,
             key_concepts=key_concepts,
+            file_references=file_references,
             rag_context=rag_context,
             retrieved_sources=retrieved_sources,
             language=language
@@ -287,10 +397,11 @@ class WikiDiagramGenerator:
         section_title: str,
         section_description: str,
         diagram_type: str,
-        key_concepts: List[str],
-        language: str,
-        corrupted_diagram: str,
-        error_message: str
+        key_concepts: List[str] = None,
+        file_references: str = None,
+        language: str = "en",
+        corrupted_diagram: str = "",
+        error_message: str = ""
     ) -> Dict:
         """
         Fix a corrupted Mermaid diagram that failed to render.
@@ -303,7 +414,8 @@ class WikiDiagramGenerator:
             section_title: Title of the section
             section_description: Description of the section
             diagram_type: Type of diagram
-            key_concepts: List of key concepts
+            key_concepts: (Optional) List of key concepts (legacy format)
+            file_references: (Optional) Detailed file analysis string (new format from iteration 3)
             language: Language code
             corrupted_diagram: The corrupted Mermaid code
             error_message: The error message from Mermaid renderer
@@ -325,6 +437,7 @@ class WikiDiagramGenerator:
             section_title=section_title,
             section_description=section_description,
             key_concepts=key_concepts,
+            file_references=file_references,
             diagram_type=diagram_type
         )
         
@@ -335,6 +448,7 @@ class WikiDiagramGenerator:
             section_description=section_description,
             diagram_type=diagram_type,
             key_concepts=key_concepts,
+            file_references=file_references,
             rag_context=rag_context,
             retrieved_sources=retrieved_sources,
             corrupted_diagram=corrupted_diagram,
@@ -435,8 +549,9 @@ Return ONLY the title text, nothing else."""
         repo_name: str,
         section_title: str,
         section_description: str,
-        key_concepts: list,
-        diagram_type: str
+        key_concepts: list = None,
+        file_references: str = None,
+        diagram_type: str = "flowchart"
     ) -> tuple:
         """Perform RAG queries for a specific section.
         
@@ -447,7 +562,8 @@ Return ONLY the title text, nothing else."""
             repo_name: Name of the repository/project
             section_title: Title of the section being generated
             section_description: Detailed description of what the section covers
-            key_concepts: List of key concepts that should be included
+            key_concepts: (Optional) List of key concepts that should be included (legacy)
+            file_references: (Optional) Detailed file analysis string (new format from iteration 3)
             diagram_type: Type of diagram being generated (flowchart, sequence, etc.)
         
         Returns:
@@ -459,6 +575,7 @@ Return ONLY the title text, nothing else."""
             section_title=section_title,
             section_description=section_description,
             key_concepts=key_concepts,
+            file_references=file_references,
             diagram_type=diagram_type
         )
         

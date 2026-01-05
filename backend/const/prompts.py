@@ -396,59 +396,64 @@ def build_page_analysis_queries(page_title: str, page_description: str) -> list:
         page_description: Description of the page
     
     Returns:
-        List of query strings
+        List of query strings with instructions for detailed file/component names
     """
     return [
-        f"What is {page_title}? {page_description}",
-        f"How does {page_title} work? Explain the implementation details.",
-        f"What are the key components and functions related to {page_title}?",
-        f"What are the data structures, classes, or APIs for {page_title}?",
-        f"Show code examples and usage patterns for {page_title}."
+        f"What is {page_title}? {page_description} Provide specific file names and component names.",
+        f"How does {page_title} work? Explain the implementation details. Include specific file paths, class names, function names, and module names.",
+        f"What are the key components and functions related to {page_title}? List specific file names (e.g., backend/utils/file.py), class names, and function names.",
+        f"What are the data structures, classes, or APIs for {page_title}? Reference specific files and component names.",
+        f"Show code examples and usage patterns for {page_title}. Include the source file paths where these examples are found."
     ]
 
 
-def build_diagram_sections_prompt(
+def build_diagram_sections_prompt_iteration1(
     repo_name: str,
     rag_context: str,
     language: str
 ) -> str:
     """
-    Build prompt to identify diagram sections for a codebase.
+    Build prompt for ITERATION 1: Identify rough diagram sections from RAG context.
     
-    This is Step 1: Analyze codebase and identify diagram-worthy sections.
+    This is the first pass to understand the codebase structure and identify
+    major aspects that should be visualized. No detailed file assignments yet.
     
     IMPORTANT: This is for a diagram-first wiki where diagrams ARE the main representation.
     The wiki is composed of interactive diagrams that explain the codebase visually.
     
     Args:
         repo_name: Name of the repository/codebase
-        rag_context: RAG-retrieved context from codebase analysis
+        rag_context: RAG-retrieved context (rationale and content only, no raw code)
         language: Target language code
     
     Returns:
-        Prompt string for LLM to identify diagram sections
+        Prompt string for LLM to identify rough diagram sections
     """
     language_name = get_language_name(language)
     
     prompt = f"""You are an expert technical writer creating a DIAGRAM-FIRST wiki for the "{repo_name}" codebase.
 
-🎯 CRITICAL CONCEPT: This wiki is MADE OF DIAGRAMS. Diagrams are the PRIMARY REPRESENTATION, not supplements.
-You will analyze this codebase and identify the key aspects that should be visualized as interactive diagrams.
+🎯 ITERATION 1: ROUGH SECTION IDENTIFICATION
 
-CODEBASE CONTEXT:
+This is the first pass to understand the codebase structure. You will identify major aspects
+that should be visualized, without worrying about detailed file assignments yet.
+
+🎯 CRITICAL CONCEPT: This wiki is MADE OF DIAGRAMS. Diagrams are the PRIMARY REPRESENTATION, not supplements.
+
+CODEBASE CONTEXT (from RAG analysis):
 {rag_context}
 
 Your task is to identify distinct diagram sections that together provide a complete visual understanding of this codebase.
 
 IMPORTANT GUIDELINES:
-1. Analyze the COMPLEXITY and SCOPE of the codebase to determine the appropriate number of diagrams
-   - Simple projects (single module, <5 files): 2-3 diagrams
-   - Medium projects (multiple modules, 5-20 files): 3-5 diagrams  
-   - Complex projects (layered architecture, >20 files): 5-8 diagrams
+1. Analyze the COMPLEXITY and SCOPE to determine appropriate number of diagrams
+   - Simple projects (single module, <5 files): 2~3 diagrams
+   - Medium projects (multiple modules, 5-20 files): 3~6 diagrams  
+   - Complex projects (layered architecture, >20 files): 6~12 diagrams
    - Let the codebase structure guide you - don't force a fixed number
 
 2. Each diagram section represents ONE focused aspect that MUST be visualized
-   - System architecture / component relationships/ moudle dependencies → flowchart
+   - System architecture / component relationships / module dependencies → flowchart
    - Data flow / process workflows → flowchart
    - Class hierarchies / inheritance → classDiagram
    - API call sequences / request-response patterns → sequence diagram
@@ -461,11 +466,10 @@ IMPORTANT GUIDELINES:
    - Fully expressible as a single Mermaid diagram
    - Essential for understanding this codebase
 
-4. 🎯 CRITICAL: Use SPECIFIC component/class/function names from the CODEBASE CONTEXT above
+4. 🎯 Use SPECIFIC component/class/function names from the CODEBASE CONTEXT
    - BAD: "API calls between client and server" (too generic)
    - GOOD: "FastAPI requests through WikiGenerator to Ollama LLM" (specific to this codebase)
    - Include actual class names, module names, function names from the context
-   - Make section_description reference concrete components, not abstract concepts
 
 5. Together, these diagrams should fully explain "{repo_name}" - no additional text needed
 
@@ -477,12 +481,12 @@ Return your analysis in the following JSON format:
       "section_id": "unique-identifier",
       "section_title": "Clear, concise title",
       "section_description": "What this section explains, using SPECIFIC component names from the codebase (2-3 sentences)",
-      "diagram_type": "flowchart|sequence|class|stateDiagram|erDiagram",
-      "key_concepts": ["concept1", "concept2", "concept3"],
-      "importance": "high|medium|low"
+      "diagram_type": "flowchart|sequence|class|stateDiagram|erDiagram"
     }}
   ]
 }}
+
+NOTE: This is iteration 1 - focus on identifying major sections. File assignments come later.
 
 IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no explanations.
 Generate the analysis in {language_name} language.
@@ -492,14 +496,209 @@ Analyze now:"""
     return prompt
 
 
+def build_diagram_sections_prompt_iteration2(
+    repo_name: str,
+    rough_sections: list,
+    code_files_content: str,
+    language: str
+) -> str:
+    """
+    Build prompt for ITERATION 2: Refine sections with detailed code file analysis.
+    
+    Takes rough sections from iteration 1 and refines them based on actual code files.
+    The LLM can merge, split, or reorganize sections based on actual implementation.
+    
+    Args:
+        repo_name: Name of the repository/codebase
+        rough_sections: List of rough sections from iteration 1
+        code_files_content: Detailed code files filtered through RAG
+        language: Target language code
+    
+    Returns:
+        Prompt string for LLM to refine diagram sections
+    """
+    language_name = get_language_name(language)
+    
+    # Format rough sections for display
+    sections_text = "\n".join([
+        f"{i+1}. {s['section_title']} ({s['diagram_type']})\n   {s['section_description']}"
+        for i, s in enumerate(rough_sections)
+    ])
+    
+    prompt = f"""You are refining the diagram structure for the "{repo_name}" codebase.
+
+🎯 ITERATION 2: REFINE SECTIONS WITH CODE FILES
+
+In iteration 1, we identified these rough sections:
+
+{sections_text}
+
+Now you have access to COMPREHENSIVE ACTUAL CODE FILES to refine these sections.
+This is a large collection of the most relevant code files from the codebase:
+
+{code_files_content}
+
+Your task is to REFINE the sections based on actual implementation:
+
+REFINEMENT GUIDELINES:
+1. Review each rough section against the actual code
+2. Merge sections if they're too granular or overlapping
+3. Split sections if they cover too many disparate concepts
+4. If there are important aspects missing when you read source code, ADD new sections
+5. Adjust diagram types if the code structure suggests a better visualization
+7. Ensure section_id uses kebab-case and reflects actual component names
+
+QUALITY CRITERIA:
+- Each section should map cleanly to code structures you see
+- Diagram type should match the code patterns (classes→classDiagram, flows→flowchart, etc.)
+- Descriptions should reference actual classes/functions/modules from the code
+- Always think: "Are these sections enough for a perfect visual interpretation of the codebase?"
+
+Return refined sections in the following JSON format:
+
+{{
+  "sections": [
+    {{
+      "section_id": "specific-identifier-from-code",
+      "section_title": "Clear title reflecting actual code",
+      "section_description": "What this section explains, referencing actual code components (2-3 sentences)",
+      "diagram_type": "flowchart|sequence|class|stateDiagram|erDiagram"
+    }}
+  ],
+  "refinement_notes": "Brief explanation of major changes from iteration 1 (optional)"
+}}
+
+IMPORTANT: Return ONLY valid JSON, no markdown code blocks.
+Generate the refined analysis in {language_name} language.
+
+Refine now:"""
+    
+    return prompt
+
+
+def build_diagram_sections_prompt_iteration3(
+    repo_name: str,
+    refined_sections: list,
+    all_code_files: list,
+    language: str
+) -> str:
+    """
+    Build prompt for ITERATION 3: Assign code files to each section.
+    
+    Takes refined sections from iteration 2 and assigns relevant code files to each.
+    One file can be assigned to multiple sections. Adds file_references field.
+    
+    Args:
+        repo_name: Name of the repository/codebase
+        refined_sections: List of refined sections from iteration 2
+        all_code_files: List of available code file paths with brief descriptions
+        language: Target language code
+    
+    Returns:
+        Prompt string for LLM to assign files to sections
+    """
+    language_name = get_language_name(language)
+    
+    # Format refined sections for display
+    sections_text = "\n".join([
+        f"{i+1}. [{s['section_id']}] {s['section_title']} ({s['diagram_type']})\n   {s['section_description']}"
+        for i, s in enumerate(refined_sections)
+    ])
+    
+    # Format available files
+    files_text = "\n".join([f"- {f}" for f in all_code_files])
+    
+    prompt = f"""You are finalizing the diagram structure for the "{repo_name}" codebase.
+
+🎯 ITERATION 3: ASSIGN CODE FILES TO SECTIONS
+
+Refined sections from iteration 2:
+
+{sections_text}
+
+Available code files in the repository:
+
+{files_text}
+
+Your task is to ASSIGN relevant code files to each section:
+
+ASSIGNMENT GUIDELINES:
+1. For each section, identify which code files are relevant for creating that diagram
+2. A file can be assigned to MULTIPLE sections if it's relevant to multiple aspects
+3. Focus on files that contain the key components/logic for that section
+4. For each file assignment, explain the relationship:
+   - What key concepts/components does this file provide?
+   - How does it connect to other files in this section?
+   - Why is it important for this diagram?
+
+FILE_REFERENCES FORMAT:
+For each section, provide a file_references string that:
+- Lists relevant files with brief analysis of their role
+- Explains key concepts and connections between files
+- Highlights what should be visualized from these files
+- Include as much detail & file names for referernce and this would help later RAG queries
+
+Example file_references:
+"backend/api.py (defines FastAPI endpoints), backend/utils/wiki_generator.py (core wiki generation logic), backend/utils/rag.py (RAG system integration). These files form the request-response pipeline: API receives requests → WikiGenerator orchestrates → RAG retrieves context. Key concepts: endpoint routing, generation workflow, context retrieval."
+
+Return sections with file assignments in the following JSON format:
+
+{{
+  "sections": [
+    {{
+      "section_id": "identifier-from-iteration-2",
+      "section_title": "Title from iteration 2",
+      "section_description": "Description from iteration 2",
+      "diagram_type": "type-from-iteration-2",
+      "file_references": "Detailed analysis of assigned files, their relationships, connections, and key concepts to visualize"
+    }}
+  ]
+}}
+
+IMPORTANT: 
+- Return ONLY valid JSON, no markdown code blocks
+- Keep section_id, section_title, section_description, diagram_type from iteration 2
+- Add comprehensive file_references for each section
+- file_references should be a STRING (not array) with detailed analysis
+
+Generate the final analysis in {language_name} language.
+
+Assign files now:"""
+    
+    return prompt
+
+
+# Legacy function name for backwards compatibility
+def build_diagram_sections_prompt(
+    repo_name: str,
+    rag_context: str,
+    language: str
+) -> str:
+    """
+    Legacy function - calls iteration 1 for backwards compatibility.
+    
+    NEW CODE SHOULD USE: build_diagram_sections_prompt_iteration1/2/3
+    
+    Args:
+        repo_name: Name of the repository/codebase
+        rag_context: RAG-retrieved context from codebase analysis
+        language: Target language code
+    
+    Returns:
+        Prompt string for LLM to identify diagram sections
+    """
+    return build_diagram_sections_prompt_iteration1(repo_name, rag_context, language)
+
+
 def build_single_diagram_prompt(
     section_title: str,
     section_description: str,
     diagram_type: str,
-    key_concepts: list,
-    rag_context: str,
-    retrieved_sources: str,
-    language: str
+    key_concepts: list = None,
+    file_references: str = None,
+    rag_context: str = "",
+    retrieved_sources: str = "",
+    language: str = "en"
 ) -> str:
     """
     Build prompt to generate a single focused Mermaid diagram for a specific section.
@@ -513,7 +712,8 @@ def build_single_diagram_prompt(
         section_title: Title of this specific section
         section_description: Description of what this section covers
         diagram_type: Type of Mermaid diagram to generate
-        key_concepts: List of key concepts to include
+        key_concepts: (Optional) List of key concepts to include (legacy format)
+        file_references: (Optional) Detailed file analysis string (new format from iteration 3)
         rag_context: RAG-retrieved context
         retrieved_sources: Retrieved source code snippets
         language: Target language code
@@ -522,6 +722,17 @@ def build_single_diagram_prompt(
         Prompt string for LLM to generate diagram
     """
     language_name = get_language_name(language)
+    
+    # Build key concepts text (prefer file_references if available)
+    concepts_text = ""
+    if file_references:
+        # New format: use detailed file analysis
+        concepts_text = f"File references and key analysis:\n{file_references}"
+    elif key_concepts and len(key_concepts) > 0:
+        # Legacy format: use key_concepts list
+        concepts_text = f"Key concepts to include: {', '.join(key_concepts)}"
+    else:
+        concepts_text = "No specific concepts provided - infer from context"
     
     # Diagram-specific instructions
     diagram_instructions = {
@@ -626,7 +837,7 @@ CONTEXT:
 - Section: {section_title}
 - Section focus: {section_description}
 - Diagram type: {diagram_type}
-- Key concepts to include: {', '.join(key_concepts)}
+- {concepts_text}
 
 CODEBASE CONTEXT:
 {rag_context}
@@ -698,12 +909,13 @@ def build_diagram_correction_prompt(
     section_title: str,
     section_description: str,
     diagram_type: str,
-    key_concepts: list,
-    rag_context: str,
-    retrieved_sources: str,
-    corrupted_diagram: str,
-    error_message: str,
-    language: str
+    key_concepts: list = None,
+    file_references: str = None,
+    rag_context: str = "",
+    retrieved_sources: str = "",
+    corrupted_diagram: str = "",
+    error_message: str = "",
+    language: str = "en"
 ) -> str:
     """
     Build prompt to fix a corrupted Mermaid diagram that failed to render.
@@ -715,7 +927,8 @@ def build_diagram_correction_prompt(
         section_title: Title of the section
         section_description: Description of the section
         diagram_type: Type of diagram
-        key_concepts: Key concepts to include
+        key_concepts: (Optional) Key concepts to include (legacy format)
+        file_references: (Optional) Detailed file analysis string (new format from iteration 3)
         rag_context: RAG-retrieved context
         retrieved_sources: Retrieved source code snippets
         corrupted_diagram: The broken Mermaid code
@@ -726,7 +939,14 @@ def build_diagram_correction_prompt(
         Prompt string for LLM to fix the diagram
     """
     language_name = get_language_name(language)
-    key_concepts_str = "\n".join([f"  - {concept}" for concept in key_concepts])
+    
+    # Build key concepts text (prefer file_references if available)
+    if file_references:
+        key_concepts_str = f"File references:\n{file_references}"
+    elif key_concepts and len(key_concepts) > 0:
+        key_concepts_str = "\n".join([f"  - {concept}" for concept in key_concepts])
+    else:
+        key_concepts_str = "  (No specific concepts provided)"
     
     # Use the same diagram instructions from build_single_diagram_prompt
     diagram_instructions = {
@@ -1334,8 +1554,9 @@ def build_section_rag_query(
     repo_name: str,
     section_title: str,
     section_description: str,
-    key_concepts: list,
-    diagram_type: str
+    key_concepts: list = None,
+    file_references: str = None,
+    diagram_type: str = "flowchart"
 ) -> str:
     """
     Build a comprehensive RAG query for retrieving section-relevant code.
@@ -1347,15 +1568,21 @@ def build_section_rag_query(
         repo_name: Name of the repository/project
         section_title: Title of the section being generated
         section_description: Detailed description of what the section covers
-        key_concepts: List of key concepts that should be included
+        key_concepts: (Optional) List of key concepts that should be included (legacy format)
+        file_references: (Optional) Detailed file analysis string (new format from iteration 3)
         diagram_type: Type of diagram being generated (flowchart, sequence, etc.)
     
     Returns:
         Comprehensive RAG query string
     """
-    # Build key concepts emphasis
+    # Build key concepts emphasis (prefer file_references if available)
     concepts_text = ""
-    if key_concepts and len(key_concepts) > 0:
+    if file_references:
+        # New format: use file_references which contains detailed analysis
+        # Extract key insights from file_references for focused RAG query
+        concepts_text = f" File analysis: {file_references[:300]}..." if len(file_references) > 300 else f" File analysis: {file_references}"
+    elif key_concepts and len(key_concepts) > 0:
+        # Legacy format: use key_concepts list
         concepts_list = ", ".join(key_concepts[:5])  # Limit to top 5
         concepts_text = f" Focus on these concepts: {concepts_list}."
     

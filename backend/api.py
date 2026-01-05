@@ -480,7 +480,8 @@ class SectionDiagramRequest(BaseModel):
     section_title: str = Field(..., description="Title of this section")
     section_description: str = Field(..., description="Description of what this section covers")
     diagram_type: str = Field(..., description="Type of Mermaid diagram (flowchart, sequence, class, etc.)")
-    key_concepts: List[str] = Field(..., description="List of key concepts to include in the diagram")
+    key_concepts: Optional[List[str]] = Field(None, description="List of key concepts to include in the diagram (legacy format)")
+    file_references: Optional[str] = Field(None, description="Detailed file analysis string (new format from iteration 3)")
     language: str = Field("en", description="Language code")
     reference_files: Optional[List[str]] = Field(None, description="Optional list of specific file paths to use as reference instead of RAG")
 
@@ -491,7 +492,8 @@ class FixDiagramRequest(BaseModel):
     section_title: str = Field(..., description="Title of this section")
     section_description: str = Field(..., description="Description of what this section covers")
     diagram_type: str = Field(..., description="Type of Mermaid diagram")
-    key_concepts: List[str] = Field(..., description="List of key concepts")
+    key_concepts: Optional[List[str]] = Field(None, description="List of key concepts (legacy format)")
+    file_references: Optional[str] = Field(None, description="Detailed file analysis string (new format from iteration 3)")
     language: str = Field("en", description="Language code")
     corrupted_diagram: str = Field(..., description="The corrupted Mermaid diagram code")
     error_message: str = Field(..., description="The Mermaid rendering error message")
@@ -613,6 +615,7 @@ async def generate_section_diagram(request: SectionDiagramRequest = Body(...)):
             request.section_description,
             request.diagram_type,
             request.key_concepts,
+            request.file_references,
             request.language,
             request.reference_files
         )
@@ -632,7 +635,8 @@ def _generate_diagram_sync(
     section_title: str,
     section_description: str,
     diagram_type: str,
-    key_concepts: list,
+    key_concepts: Optional[list],
+    file_references: Optional[str],
     language: str,
     reference_files: Optional[List[str]] = None
 ):
@@ -645,6 +649,7 @@ def _generate_diagram_sync(
         section_description=section_description,
         diagram_type=diagram_type,
         key_concepts=key_concepts,
+        file_references=file_references,
         language=language,
         use_cache=True,
         reference_files=reference_files
@@ -684,6 +689,7 @@ async def fix_corrupted_diagram(request: FixDiagramRequest = Body(...)):
             request.section_description,
             request.diagram_type,
             request.key_concepts,
+            request.file_references,
             request.language,
             request.corrupted_diagram,
             request.error_message
@@ -704,7 +710,8 @@ def _fix_diagram_sync(
     section_title: str,
     section_description: str,
     diagram_type: str,
-    key_concepts: list,
+    key_concepts: Optional[list],
+    file_references: Optional[str],
     language: str,
     corrupted_diagram: str,
     error_message: str
@@ -718,6 +725,7 @@ def _fix_diagram_sync(
         section_description=section_description,
         diagram_type=diagram_type,
         key_concepts=key_concepts,
+        file_references=file_references,
         language=language,
         corrupted_diagram=corrupted_diagram,
         error_message=error_message
