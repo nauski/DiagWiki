@@ -15,7 +15,8 @@ from const.const import Const, get_llm_client
 from const.prompts import (
     build_page_analysis_queries,
     build_diagram_sections_prompt,
-    build_single_diagram_prompt
+    build_single_diagram_prompt,
+    build_section_rag_query
 )
 from utils.mermaid_parser import parse_mermaid_diagram, validate_mermaid_syntax
 
@@ -214,7 +215,6 @@ class WikiDiagramGenerator:
             raise RuntimeError("RAG not initialized. Call initialize_rag() first.")
         
         # For custom diagrams (long prompts as titles), generate a concise title
-        original_title = section_title
         if section_id.startswith('custom_') and len(section_title) > 60:
             logger.info(f"Generating concise title from prompt: {section_title[:100]}...")
             section_title = self._generate_concise_title(section_title, section_description)
@@ -226,8 +226,15 @@ class WikiDiagramGenerator:
             logger.info(f"Using {len(reference_files)} manually selected reference files")
             rag_context, retrieved_sources, all_retrieved_docs = self._read_reference_files(reference_files)
         else:
-            # Automatic mode: use RAG
-            rag_context, retrieved_sources, all_retrieved_docs = self._perform_section_rag_queries(section_title if len(section_title) < 60 else section_description)
+            # Automatic mode: use RAG with full context
+            repo_name = os.path.basename(self.root_path)
+            rag_context, retrieved_sources, all_retrieved_docs = self._perform_section_rag_queries(
+                repo_name=repo_name,
+                section_title=section_title,
+                section_description=section_description,
+                key_concepts=key_concepts,
+                diagram_type=diagram_type
+            )
         
         # Build diagram prompt
         logger.info(f"Generating diagram for: {section_title}")
@@ -256,7 +263,7 @@ class WikiDiagramGenerator:
                         "file": file_path,
                         "relevance": f"Used to generate {section_title}"
                     })
-        
+        logger.info(f"Extracted {len(source_files)} unique source files for diagram generation, originally retrieved {len(all_retrieved_docs)} documents")
         # Process the diagram response
         result = self._process_diagram_response(
             diagram_data,
@@ -311,9 +318,14 @@ class WikiDiagramGenerator:
         if self.rag is None:
             raise RuntimeError("RAG not initialized. Call initialize_rag() first.")
         
-        # Perform RAG queries to get context (same as normal generation)
+        # Perform RAG queries with full context (same as normal generation)
+        repo_name = os.path.basename(self.root_path)
         rag_context, retrieved_sources, all_retrieved_docs = self._perform_section_rag_queries(
-            section_title if len(section_title) < 60 else section_description
+            repo_name=repo_name,
+            section_title=section_title,
+            section_description=section_description,
+            key_concepts=key_concepts,
+            diagram_type=diagram_type
         )
         
         # Build error correction prompt
@@ -418,41 +430,61 @@ Return ONLY the title text, nothing else."""
         
         return title
     
-    def _perform_section_rag_queries(self, section_title: str) -> tuple:
+    def _perform_section_rag_queries(
+        self,
+        repo_name: str,
+        section_title: str,
+        section_description: str,
+        key_concepts: list,
+        diagram_type: str
+    ) -> tuple:
         """Perform RAG queries for a specific section.
         
-        Optimized to use a single combined query instead of 3 separate queries.
-        This reduces LLM calls from 3 to 1 per section (3x speedup).
+        Uses a comprehensive query built with project context, section details,
+        and diagram-type-specific hints to retrieve the most relevant code.
+        
+        Args:
+            repo_name: Name of the repository/project
+            section_title: Title of the section being generated
+            section_description: Detailed description of what the section covers
+            key_concepts: List of key concepts that should be included
+            diagram_type: Type of diagram being generated (flowchart, sequence, etc.)
+        
+        Returns:
+            Tuple of (rag_context, retrieved_sources, all_retrieved_docs)
         """
-        # Use a single comprehensive query instead of 3 separate queries
-        combined_query = (
-            f"Explain {section_title}: How does it work? "
-            f"What components are involved? What is the implementation?"
+        # Build comprehensive RAG query with full context
+        comprehensive_query = build_section_rag_query(
+            repo_name=repo_name,
+            section_title=section_title,
+            section_description=section_description,
+            key_concepts=key_concepts,
+            diagram_type=diagram_type
         )
         
-        logger.info(f"Performing RAG query for section: {section_title}")
+        logger.info(f"RAG query for '{section_title}': {comprehensive_query[:100]}...")
         rag_results = []
         all_retrieved_docs = []
         
         try:
             answer, retrieved_docs = self.rag.call(
-                query=combined_query,
+                query=comprehensive_query,
                 top_k=Const.RAG_TOP_K,
                 use_reranking=True
             )
             # Validate answer is not None
             if answer is None:
-                logger.warning(f"RAG query returned None for '{combined_query[:50]}...'")
+                logger.warning(f"RAG query returned None for '{comprehensive_query[:50]}...'")
             else:
                 rag_results.append({
-                    "query": combined_query,
+                    "query": comprehensive_query,
                     "answer": answer.answer if hasattr(answer, 'answer') else str(answer),
                     "rationale": answer.rationale if hasattr(answer, 'rationale') else ""
                 })
                 all_retrieved_docs.extend(retrieved_docs)
-                logger.info(f"RAG query completed: {combined_query[:60]}...")
+                logger.info(f"✅ Retrieved {len(retrieved_docs)} unique files for: {section_title}")
         except Exception as e:
-            logger.warning(f"RAG query failed for '{combined_query[:50]}...': {e}")
+            logger.warning(f"RAG query failed for '{comprehensive_query[:50]}...': {e}")
         
         # Build RAG context
         rag_context_parts = []

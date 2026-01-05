@@ -1285,3 +1285,54 @@ CRITICAL RULES:
 Respond with valid JSON only:"""
     
     return prompt
+
+
+def build_section_rag_query(
+    repo_name: str,
+    section_title: str,
+    section_description: str,
+    key_concepts: list,
+    diagram_type: str
+) -> str:
+    """
+    Build a comprehensive RAG query for retrieving section-relevant code.
+    
+    This query is designed to retrieve the most relevant code files for diagram generation.
+    It includes project context, section focus, and specific concepts to look for.
+    
+    Args:
+        repo_name: Name of the repository/project
+        section_title: Title of the section being generated
+        section_description: Detailed description of what the section covers
+        key_concepts: List of key concepts that should be included
+        diagram_type: Type of diagram being generated (flowchart, sequence, etc.)
+    
+    Returns:
+        Comprehensive RAG query string
+    """
+    # Build key concepts emphasis
+    concepts_text = ""
+    if key_concepts and len(key_concepts) > 0:
+        concepts_list = ", ".join(key_concepts[:5])  # Limit to top 5
+        concepts_text = f" Focus on these concepts: {concepts_list}."
+    
+    # Diagram type specific hints for what to look for
+    diagram_hints = {
+        "flowchart": "Look for process flows, workflows, data transformations, and control logic.",
+        "sequence": "Look for interactions between components, API calls, function call sequences, and message passing.",
+        "class": "Look for class definitions, inheritance relationships, interfaces, and object structures.",
+        "stateDiagram": "Look for state transitions, lifecycle management, state handling, and event flows.",
+        "erDiagram": "Look for data models, database schemas, entity relationships, and data structures."
+    }
+    diagram_hint = diagram_hints.get(diagram_type, "Look for relevant code structures and patterns.")
+    
+    # Build comprehensive query
+    query = (
+        f"In the {repo_name} project, explain {section_title}: "
+        f"{section_description} "
+        f"What are the main components involved? How do they work together? "
+        f"What is the implementation? {diagram_hint}"
+        f"{concepts_text}"
+    )
+    
+    return query

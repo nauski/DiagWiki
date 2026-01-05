@@ -155,7 +155,7 @@ class RepoUtil:
                 meta_data["file_path"] = relative_path
                 meta_data["real_path"] = relative_path
             
-            return Document(text=f'File_path: {relative_path}\ncontent: {content}', meta_data=meta_data)
+            return Document(text=content, meta_data=meta_data)
             
         except Exception as e:
             logger.error(f"Error reading file {full_path}: {e}")

@@ -65,7 +65,7 @@ class Const:
     # ============================================================
     # Timeout (seconds) for LLM API calls
     # This prevents indefinite hangs when Ollama is busy or reloading models
-    LLM_TIMEOUT = 180.0  # 3 minutes - enough for model reload + generation
+    LLM_TIMEOUT = 120.0  # 2 minutes - enough for model reload + generation
     
     # Keep-alive duration for Ollama models (prevents frequent reloads)
     # Set to "10m" to keep model loaded for 10 minutes after last request
@@ -105,7 +105,7 @@ class Const:
     MAX_FILE_CHARS = 50000
     
     # Default top_k for RAG queries
-    RAG_TOP_K = 20
+    RAG_TOP_K = 40
     
     # Maximum tokens for document chunking
     MAX_TOKEN_LIMIT = 8192
