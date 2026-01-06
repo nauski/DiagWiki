@@ -7,7 +7,7 @@
 DiagWiki transforms any codebase into an interactive visual wiki where **diagrams are the primary content**, not supplements. It uses LLM + RAG to:
 
 - Automatically analyze your codebase and identify key architectural aspects
-- Generate comprehensive Mermaid diagrams (flowchart, sequence, class, state, ER)
+- Generate comprehensive Mermaid diagrams (flowchart, sequence, class, state, erDiagram)
 - Provide interactive explanations for every node and edge
 - Fix broken diagrams with intelligent error correction
 - Answer questions about your codebase using RAG
@@ -50,7 +50,7 @@ npm run dev
 ```
 
 Frontend runs on `http://localhost:5173`. Use any web browser to access and interact with DiagWiki.
-    
+
 ## Core Features
 
 ### 1. **Automatic Section Identification** (3-Iteration System)
