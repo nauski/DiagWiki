@@ -801,6 +801,8 @@ def build_single_diagram_prompt(
   }
 - CRITICAL: Do NOT use 'class EntityName {' - that's for class diagrams!
 - Use only: EntityName { ... } without the 'class' keyword
+- CRITICAL: ONLY use cardinality relationship syntax (||--o{, }o--o{, ||--||, etc.)
+- NEVER use arrow syntax (-->, --->, etc.) - that's for flowcharts, NOT ER diagrams!
 - Show relationships: EntityA ||--o{ EntityB : relationship_name
 - Relationship cardinality: ||--o{ (one-to-many), }o--o{ (many-to-many), ||--|| (one-to-one)
 - Example:
@@ -971,6 +973,8 @@ def build_diagram_correction_prompt(
         "erDiagram": """- MUST start with: erDiagram
 - Define entities: EntityName { type attribute }
 - CRITICAL: Do NOT use 'class' keyword (that's for class diagrams!)
+- CRITICAL: ONLY use cardinality syntax (||--o{, }o--o{, ||--||)
+- NEVER use arrow syntax (-->, --->) - that's for flowcharts!
 - Use ||--o{ for relationship types
 - Example: CUSTOMER { int id } \nCUSTOMER ||--o{ ORDER : places"""
     }
@@ -1078,6 +1082,11 @@ def build_diagram_correction_prompt(
     ]
     
     common_errors_er = [
+        "**CRITICAL: Using '-->' arrow syntax** → Parse error: ER diagrams do NOT support arrow syntax!",
+        "   - WRONG: Entity1 --> Entity2 : relationship",
+        "   - RIGHT: Entity1 ||--o{ Entity2 : relationship",
+        "   - Arrow syntax (-->, --->, etc.) is ONLY for flowcharts!",
+        "   - ER diagrams require cardinality syntax: ||--o{, }o--o{, ||--||, etc.",
         "**CRITICAL: Using 'class' keyword** → Parse error on line X: got 'BLOCK_START'",
         "   - WRONG: class User { string id ... }",
         "   - RIGHT: User { string id ... }",

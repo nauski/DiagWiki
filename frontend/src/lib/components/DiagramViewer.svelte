@@ -626,12 +626,21 @@
 				</div>
 				
 				<div class="flex-1 overflow-auto bg-gray-50">
-					<textarea
-						bind:value={editedCode}
-						class="w-full h-full p-4 text-xs font-mono text-gray-800 bg-gray-50 border-none resize-none focus:outline-none focus:ring-0"
-						placeholder="Enter Mermaid code..."
-						spellcheck="false"
-					></textarea>
+					<div class="flex text-xs font-mono">
+						<!-- Line numbers column -->
+						<div class="flex-shrink-0 px-3 py-4 bg-gray-100 text-gray-500 text-right select-none border-r border-gray-300 user-select-none">
+							{#each editedCode.split('\n') as _, i}
+								<div class="leading-5">{i + 1}</div>
+							{/each}
+						</div>
+						<!-- Code content -->
+						<textarea
+							bind:value={editedCode}
+							class="flex-1 p-4 text-gray-800 bg-gray-50 border-none resize-none focus:outline-none focus:ring-0 leading-5"
+							placeholder="Enter Mermaid code..."
+							spellcheck="false"
+						></textarea>
+					</div>
 				</div>
 				
 				{#if updateError}
