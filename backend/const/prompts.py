@@ -488,7 +488,13 @@ Return your analysis in the following JSON format:
 
 NOTE: This is iteration 1 - focus on identifying major sections. File assignments come later.
 
-IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no explanations.
+⚠️ CRITICAL JSON REQUIREMENTS:
+1. Return ONLY valid JSON - no markdown code blocks, no extra text
+2. ALL fields are REQUIRED: section_id, section_title, section_description, diagram_type
+3. Do NOT omit any fields - every section must have all 4 fields
+4. Use proper JSON syntax with double quotes and correct commas
+5. diagram_type must be one of: flowchart, sequence, class, stateDiagram, erDiagram
+
 Generate the analysis in {language_name} language.
 
 Analyze now:"""
@@ -568,7 +574,12 @@ Return refined sections in the following JSON format:
   "refinement_notes": "Brief explanation of major changes from iteration 1 (optional)"
 }}
 
-IMPORTANT: Return ONLY valid JSON, no markdown code blocks.
+⚠️ CRITICAL JSON REQUIREMENTS:
+1. Return ONLY valid JSON - no markdown code blocks, no extra text
+2. ALL fields are REQUIRED for each section: section_id, section_title, section_description, diagram_type
+3. Do NOT omit any fields - every section MUST have all 4 fields
+4. Use proper JSON syntax with double quotes and correct commas
+5. diagram_type must be one of: flowchart, sequence, class, stateDiagram, erDiagram
 Generate the refined analysis in {language_name} language.
 
 Refine now:"""
@@ -655,11 +666,14 @@ Return sections with file assignments in the following JSON format:
   ]
 }}
 
-IMPORTANT: 
-- Return ONLY valid JSON, no markdown code blocks
-- Keep section_id, section_title, section_description, diagram_type from iteration 2
-- Add comprehensive file_references for each section
-- file_references should be a STRING (not array) with detailed analysis
+⚠️ CRITICAL JSON REQUIREMENTS:
+1. Return ONLY valid JSON - no markdown code blocks, no extra text
+2. Keep ALL fields from iteration 2: section_id, section_title, section_description, diagram_type
+3. Add file_references field for each section (STRING, not array)
+4. ALL 5 fields are REQUIRED: section_id, section_title, section_description, diagram_type, file_references
+5. Do NOT omit any fields - every section MUST have all 5 fields
+6. Use proper JSON syntax with double quotes and correct commas
+7. diagram_type must be one of: flowchart, sequence, class, stateDiagram, erDiagram
 
 Generate the final analysis in {language_name} language.
 

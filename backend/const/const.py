@@ -84,8 +84,8 @@ class Const:
     }
 
     TEXT_SPLIT_CONFIG = {
-        "split_by": "word",
-        "chunk_size": 350,
+        "split_by": "token",
+        "chunk_size": 1000,
         "chunk_overlap": 50,
     }
 

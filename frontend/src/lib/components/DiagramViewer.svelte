@@ -189,7 +189,19 @@
 	async function exportDiagram(format: ExportFormat) {
 		if (!svgRef) return;
 
+		// Save current pan/zoom state
+		let savedTransform: any = null;
+		if (panzoomInstance) {
+			savedTransform = panzoomInstance.getTransform();
+			// Reset to original view (no zoom, no pan)
+			panzoomInstance.moveTo(0, 0);
+			panzoomInstance.zoomAbs(0, 0, 1);
+		}
+
 		try {
+			// Small delay to ensure transform is applied
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
 			const svgClone = svgRef.cloneNode(true) as SVGSVGElement;
 			const svgData = new XMLSerializer().serializeToString(svgClone);
 			
@@ -212,11 +224,39 @@
 		} catch (error) {
 			console.error('Failed to export diagram:', error);
 			alert(`Failed to export diagram: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		} finally {
+			// Restore previous pan/zoom state
+			if (panzoomInstance && savedTransform) {
+				panzoomInstance.zoomAbs(0, 0, savedTransform.scale);
+				panzoomInstance.moveTo(savedTransform.x, savedTransform.y);
+			}
 		}
 	}
 
 	async function exportAsSVG(svgData: string) {
-		const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+		// Parse the SVG to modify it
+		const parser = new DOMParser();
+		const svgDoc = parser.parseFromString(svgData, 'image/svg+xml');
+		const svgElement = svgDoc.documentElement as unknown as SVGSVGElement;
+		
+		// Get actual bounding box of all content using the original svgRef
+		if (svgRef) {
+			const bbox = svgRef.getBBox();
+			
+			// Add padding (40px on each side)
+			const padding = 40;
+			const width = bbox.width + (padding * 2);
+			const height = bbox.height + (padding * 2);
+			
+			// Set the viewBox to include all content with padding, centered
+			svgElement.setAttribute('viewBox', `${bbox.x - padding} ${bbox.y - padding} ${width} ${height}`);
+			svgElement.setAttribute('width', width.toString());
+			svgElement.setAttribute('height', height.toString());
+		}
+		
+		// Serialize the modified SVG
+		const modifiedSvgData = new XMLSerializer().serializeToString(svgElement);
+		const svgBlob = new Blob([modifiedSvgData], { type: 'image/svg+xml;charset=utf-8' });
 		const url = URL.createObjectURL(svgBlob);
 		downloadFile(url, `${diagram.section_id}.svg`);
 		URL.revokeObjectURL(url);
@@ -227,10 +267,12 @@
 		const ctx = canvas.getContext('2d');
 		if (!ctx) throw new Error('Could not get canvas context');
 
-		// Get SVG dimensions from viewBox or width/height attributes
+		// Get dimensions from viewBox or element attributes
 		const viewBox = svgElement.viewBox.baseVal;
-		const width = viewBox.width || svgElement.width.baseVal.value || 800;
-		const height = viewBox.height || svgElement.height.baseVal.value || 600;
+		let width = (viewBox && viewBox.width > 0) ? viewBox.width : 
+		           parseInt(svgElement.getAttribute('width') || '0') || svgElement.clientWidth || 800;
+		let height = (viewBox && viewBox.height > 0) ? viewBox.height : 
+		            parseInt(svgElement.getAttribute('height') || '0') || svgElement.clientHeight || 600;
 		
 		const scale = 2; // Higher resolution
 		canvas.width = width * scale;
@@ -273,15 +315,15 @@
 	}
 
 	async function exportAsPDF(svgElement: SVGSVGElement) {
-		// Get SVG dimensions from viewBox or width/height attributes
-		const viewBox = svgElement.viewBox.baseVal;
-		const width = viewBox.width || svgElement.width.baseVal.value || 800;
-		const height = viewBox.height || svgElement.height.baseVal.value || 600;
-
 		// First convert SVG to canvas
 		const canvas = document.createElement('canvas');
 		const ctx = canvas.getContext('2d');
 		if (!ctx) throw new Error('Could not get canvas context');
+
+		// Get dimensions from viewBox or fallback to width/height
+		const viewBox = svgElement.viewBox.baseVal;
+		const width = viewBox.width || parseInt(svgElement.getAttribute('width') || '800');
+		const height = viewBox.height || parseInt(svgElement.getAttribute('height') || '600');
 
 		const scale = 2; // High resolution
 		canvas.width = width * scale;

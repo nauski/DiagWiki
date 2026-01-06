@@ -76,6 +76,21 @@ class WikiDiagramGenerator:
                 logger.info(f"✅ Using cached diagram sections from: {cache_file}")
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
+                    
+                    # Validate cached sections
+                    if 'sections' in cached_data:
+                        valid_sections = []
+                        invalid_count = 0
+                        for section in cached_data['sections']:
+                            if self._validate_section(section, "cached data"):
+                                valid_sections.append(section)
+                            else:
+                                invalid_count += 1
+                        
+                        if invalid_count > 0:
+                            logger.warning(f"⚠️  Found {invalid_count} invalid sections in cache, keeping {len(valid_sections)} valid ones")
+                            cached_data['sections'] = valid_sections
+                    
                     cached_data['cached'] = True
                     cached_data['cache_file'] = cache_file
                     return cached_data
@@ -237,6 +252,31 @@ class WikiDiagramGenerator:
         
         return result
     
+    def _validate_section(self, section: Dict, iteration_name: str) -> bool:
+        """Validate that a section has all required fields.
+        
+        Args:
+            section: Section dictionary to validate
+            iteration_name: Name of iteration for logging
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        required_fields = ['section_id', 'section_title', 'section_description', 'diagram_type']
+        
+        for field in required_fields:
+            if field not in section or not section[field]:
+                logger.warning(f"❌ {iteration_name}: Section missing required field '{field}': {section.get('section_id', 'unknown')}")
+                return False
+        
+        # Validate diagram_type is valid
+        valid_types = ['flowchart', 'sequence', 'class', 'stateDiagram', 'erDiagram']
+        if section['diagram_type'] not in valid_types:
+            logger.warning(f"❌ {iteration_name}: Invalid diagram_type '{section['diagram_type']}' for section {section['section_id']}")
+            return False
+            
+        return True
+    
     def _call_llm_for_sections(self, prompt: str, iteration_name: str, return_full: bool = False) -> any:
         """Helper method to call LLM for section identification iterations."""
         model = get_llm_client()
@@ -266,12 +306,35 @@ class WikiDiagramGenerator:
         
         try:
             sections_data = json.loads(sections_json)
+            
+            # Validate sections if present
+            if 'sections' in sections_data:
+                valid_sections = []
+                invalid_count = 0
+                
+                for section in sections_data['sections']:
+                    if self._validate_section(section, iteration_name):
+                        valid_sections.append(section)
+                    else:
+                        invalid_count += 1
+                
+                if invalid_count > 0:
+                    logger.warning(f"⚠️  {iteration_name}: Filtered out {invalid_count} invalid sections, kept {len(valid_sections)} valid ones")
+                
+                # If ALL sections are invalid, return error
+                if len(valid_sections) == 0 and len(sections_data['sections']) > 0:
+                    logger.error(f"❌ {iteration_name}: All {len(sections_data['sections'])} sections were invalid!")
+                    return None if return_full else []
+                
+                sections_data['sections'] = valid_sections
+            
             if return_full:
                 return sections_data
             else:
                 return sections_data.get('sections', [])
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse {iteration_name} JSON: {e}")
+            logger.error(f"Raw response: {sections_json[:500]}...")
             return None if return_full else []
     
     def generate_section_diagram(
