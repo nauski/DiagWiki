@@ -270,12 +270,12 @@
 	{/if}
 
 	{#if isQuerying && streamingText}
-		<div class="mt-2 border border-gray-200 rounded-md bg-gray-50 overflow-hidden" style="max-height: 30vh;">
-			<div class="px-3 py-2 bg-gray-100">
-				<span class="text-xs font-semibold text-gray-700 uppercase">Generating Response...</span>
+		<div class="mt-2 border border-blue-200 rounded-md bg-blue-50 overflow-hidden" style="max-height: 30vh;">
+			<div class="px-3 py-2 bg-blue-100">
+				<span class="text-xs font-semibold text-blue-700 uppercase">Generating Response...</span>
 			</div>
 			<div class="p-3 overflow-y-auto" style="max-height: calc(30vh - 40px);">
-				<pre class="text-sm text-gray-900 whitespace-pre-wrap font-mono">{streamingText}</pre>
+				<p class="text-sm text-gray-900 whitespace-pre-wrap">{streamingText}</p>
 			</div>
 		</div>
 	{/if}

@@ -1010,7 +1010,15 @@ class WikiGenerator:
             if is_valid:
                 parsed = parse_mermaid_diagram(mermaid_code)
                 
-                # Structure the result
+                # Structure the result with RAG sources
+                rag_sources = [
+                    {
+                        "file": doc.meta_data.get('file_path', 'unknown'),
+                        "relevance": f'Used to modify {diagram_data.get("section_title", wiki_name)}'
+                    }
+                    for doc in codebase_docs
+                ]
+                
                 result = {
                     "status": "success",
                     "section_id": wiki_name,
@@ -1025,6 +1033,7 @@ class WikiGenerator:
                     },
                     "nodes": {},
                     "edges": {},
+                    "rag_sources": rag_sources,
                     "cached": False,
                     "modified": True
                 }
