@@ -724,10 +724,9 @@
 
 <!-- Export Format Modal -->
 {#if showExportModal}
-	<div class="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+	<div class="fixed inset-0 flex items-center justify-center z-50 pointer-events-auto" on:click={closeExportModal}>
 		<div class="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full mx-4 pointer-events-auto border border-gray-200" on:click|stopPropagation>
 			<h3 class="text-lg font-semibold text-gray-900 mb-4">Export Diagram</h3>
-			<p class="text-sm text-gray-600 mb-4">Choose export format:</p>
 			
 			<div class="space-y-2">
 				<button
