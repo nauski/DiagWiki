@@ -129,7 +129,8 @@
 				.replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
 			
 			section = {
-				section_id: customId || `custom-${Date.now()}`, // Fallback to timestamp if title is invalid
+				section_id: customId? `${customId.slice(0, 50)}-${Date.now()}` : `custom-${Date.now()}`,
+				// section_id: customId || `custom-${Date.now()}`, // Fallback to timestamp if title is invalid
 				section_title: prompt,
 				section_description: prompt,
 				diagram_type: selectedDiagramType,
