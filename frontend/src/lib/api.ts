@@ -130,6 +130,61 @@ export async function queryWikiProblem(rootPath: string, prompt: string) {
 	return await response.json();
 }
 
+export function queryWikiProblemStream(
+	rootPath: string,
+	prompt: string,
+	onChunk: (chunk: string) => void,
+	onComplete: (fullResponse: any) => void,
+	onError: (error: string) => void
+): () => void {
+	const wsUrl = API_BASE.replace('http', 'ws') + '/ws/wikiProblem';
+	const ws = new WebSocket(wsUrl);
+	
+	let accumulated = '';
+	
+	ws.onopen = () => {
+		ws.send(JSON.stringify({
+			root_path: rootPath,
+			prompt: prompt,
+			wiki_items: null
+		}));
+	};
+	
+	ws.onmessage = (event) => {
+		const data = JSON.parse(event.data);
+		
+		if (data.type === 'chunk') {
+			accumulated += data.content;
+			onChunk(data.content);
+		} else if (data.type === 'complete') {
+			try {
+				const parsed = JSON.parse(accumulated);
+				onComplete(parsed);
+			} catch (e) {
+				onError('Failed to parse response: ' + accumulated);
+			}
+		} else if (data.type === 'error') {
+			onError(data.message);
+		}
+	};
+	
+	ws.onerror = () => {
+		onError('WebSocket connection error');
+	};
+	
+	ws.onclose = () => {
+		// Connection closed
+	};
+	
+	// Return cleanup function
+	return () => {
+		if (ws.readyState === WebSocket.OPEN) {
+			ws.close();
+		}
+	};
+}
+
+
 export async function queryWithWiki(rootPath: string, query: string, includeWiki: boolean = true) {
 	const params = new URLSearchParams({
 		root_path: rootPath,

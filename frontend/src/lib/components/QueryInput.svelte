@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { currentProject, identifiedSections, diagramCache, openTabs, generatedDiagrams } from '$lib/stores';
-	import { queryWikiProblem, generateSectionDiagram } from '$lib/api';
+	import { queryWikiProblemStream, generateSectionDiagram } from '$lib/api';
 
 	let query = '';
 	let isQuerying = false;
@@ -8,23 +8,39 @@
 	let error = '';
 	let isExpanded = true;
 	let isExecuting = false;
+	let streamingText = '';
+	let cancelStream: (() => void) | null = null;
 
-	async function handleSubmit() {
+	function handleSubmit() {
 		if (!query.trim() || !$currentProject || isQuerying) return;
 
 		isQuerying = true;
 		error = '';
 		result = null;
+		streamingText = '';
 
-		try {
-			const response = await queryWikiProblem($currentProject, query);
-			result = response;
-			isExpanded = true;
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Query failed';
-		} finally {
-			isQuerying = false;
-		}
+		// Start streaming
+		cancelStream = queryWikiProblemStream(
+			$currentProject,
+			query,
+			// On chunk
+			(chunk: string) => {
+				streamingText += chunk;
+			},
+			// On complete
+			(response: any) => {
+				result = response;
+				isExpanded = true;
+				isQuerying = false;
+				cancelStream = null;
+			},
+			// On error
+			(errorMsg: string) => {
+				error = errorMsg;
+				isQuerying = false;
+				cancelStream = null;
+			}
+		);
 	}
 
 	async function handleExecutePlan() {
@@ -250,6 +266,17 @@
 	{#if error}
 		<div class="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
 			<p class="text-red-700 text-sm">{error}</p>
+		</div>
+	{/if}
+
+	{#if isQuerying && streamingText}
+		<div class="mt-2 border border-gray-200 rounded-md bg-gray-50 overflow-hidden" style="max-height: 30vh;">
+			<div class="px-3 py-2 bg-gray-100">
+				<span class="text-xs font-semibold text-gray-700 uppercase">Generating Response...</span>
+			</div>
+			<div class="p-3 overflow-y-auto" style="max-height: calc(30vh - 40px);">
+				<pre class="text-sm text-gray-900 whitespace-pre-wrap font-mono">{streamingText}</pre>
+			</div>
 		</div>
 	{/if}
 

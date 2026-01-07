@@ -2,7 +2,7 @@ import os, logging, json
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Query, HTTPException, Body
+from fastapi import FastAPI, Query, HTTPException, Body, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
@@ -837,6 +837,65 @@ class ModifyOrCreateWikiRequest(BaseModel):
     wiki_name: str = Field(..., description="Name/ID of the wiki section to create or modify")
     is_new: bool = Field(..., description="Whether this is a new wiki section or modification of existing")
     diagram_type: Optional[str] = Field(None, description="Diagram type: 'auto' to let LLM determine, or specific type (flowchart, sequence, class, stateDiagram, erDiagram)")
+
+
+@app.websocket("/ws/wikiProblem")
+async def websocket_wiki_problem(websocket: WebSocket):
+    """
+    WebSocket endpoint for streaming wiki problem analysis.
+    Streams the LLM response in real-time as it generates.
+    """
+    await websocket.accept()
+    
+    try:
+        # Receive request data
+        data = await websocket.receive_json()
+        root_path = data.get("root_path")
+        prompt = data.get("prompt")
+        wiki_items = data.get("wiki_items")
+        
+        logger.info(f"WebSocket wiki problem for: {root_path}")
+        logger.info(f"Prompt: {prompt[:100]}...")
+        
+        # Validate folder
+        if not os.path.exists(root_path):
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Folder not found: {root_path}"
+            })
+            await websocket.close()
+            return
+        
+        # Use WikiGenerator with streaming
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        wiki_gen = WikiGenerator(root_path=root_path, data_dir=data_dir)
+        
+        # Stream the analysis
+        async for chunk in wiki_gen.analyze_wiki_problem_stream(
+            user_prompt=prompt,
+            wiki_items=wiki_items,
+            websocket=websocket
+        ):
+            await websocket.send_json({
+                "type": "chunk",
+                "content": chunk
+            })
+        
+        await websocket.send_json({"type": "complete"})
+        await websocket.close()
+        
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected by client")
+    except Exception as e:
+        logger.error(f"Error in WebSocket wiki problem: {e}", exc_info=True)
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e)
+            })
+            await websocket.close()
+        except:
+            pass
 
 
 @app.post("/wikiProblem")

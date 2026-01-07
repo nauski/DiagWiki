@@ -465,6 +465,95 @@ class WikiGenerator:
             corrupted_diagram, error_message
         )
     
+    async def analyze_wiki_problem_stream(
+        self,
+        user_prompt: str,
+        wiki_items: Optional[Dict[str, str]] = None,
+        websocket = None
+    ):
+        """
+        Stream the wiki problem analysis in real-time.
+        
+        Args:
+            user_prompt: User's request
+            wiki_items: Optional dict of {wiki_name: question} pairs
+            websocket: WebSocket connection for streaming
+        
+        Yields:
+            Text chunks from LLM response
+        """
+        from const.prompts import build_wiki_problem_analysis_prompt
+        from adalflow.core.db import LocalDB
+        import ollama
+        
+        # Ensure RAG is initialized
+        self.initialize_rag()
+        
+        # Retrieve contexts (same as non-streaming)
+        wiki_context = ""
+        wiki_db_path = self.cache.wiki_db_path
+        
+        if os.path.exists(wiki_db_path):
+            try:
+                wiki_db = LocalDB.load_state(filepath=wiki_db_path)
+                wiki_docs = wiki_db.get_transformed_data(key="wiki_content")
+                
+                if wiki_docs:
+                    wiki_context = "\n\n".join([
+                        f"[{doc.meta_data.get('content_id', 'unknown')}]\n{doc.text[:500]}"
+                        for doc in wiki_docs[:10]
+                    ])
+            except Exception as e:
+                logger.warning(f"Could not load wiki context: {e}")
+        
+        if not wiki_context:
+            wiki_context = "No existing wiki content found."
+        
+        # Query codebase
+        try:
+            rag_answer, codebase_docs = self.rag.call(
+                query=user_prompt,
+                top_k=Const.RAG_TOP_K,
+                use_reranking=True
+            )
+            
+            codebase_context = "\n\n".join([
+                f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:500]}"
+                for doc in codebase_docs[:20]
+            ])
+        except Exception as e:
+            logger.warning(f"Could not query codebase: {e}")
+            codebase_context = "Codebase context unavailable."
+        
+        # Build prompt
+        prompt = build_wiki_problem_analysis_prompt(
+            user_prompt=user_prompt,
+            wiki_context=wiki_context,
+            codebase_context=codebase_context,
+            wiki_items=wiki_items
+        )
+        
+        # Stream from Ollama
+        client = ollama.Client(host=Const.OLLAMA_HOST, timeout=Const.LLM_TIMEOUT)
+        
+        stream_response = client.chat(
+            model=Const.GENERATION_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+            format="json",
+            options={
+                "temperature": Const.DEFAULT_TEMPERATURE,
+                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+            }
+        )
+        
+        # Stream chunks
+        for chunk in stream_response:
+            if 'message' in chunk and 'content' in chunk['message']:
+                content = chunk['message']['content']
+                if content:
+                    yield content
+    
     def analyze_wiki_problem(
         self,
         user_prompt: str,
