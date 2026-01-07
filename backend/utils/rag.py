@@ -7,7 +7,7 @@ import adalflow as adal
 from adalflow.components.retriever import FAISSRetriever
 from adalflow.core.types import Document
 from adalflow.core.db import LocalDB
-from const.const import Const
+from const.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +66,11 @@ class RAG(adal.Component):
         Initialize the RAG component.
 
         Args:
-            model: Model name to use (defaults to Const.GENERATION_MODEL)
+            model: Model name to use (defaults to Config.GENERATION_MODEL)
         """
         super().__init__()
 
-        self.model = model or Const.GENERATION_MODEL
+        self.model = model or Config.GENERATION_MODEL
         
         # Check if Ollama model exists
         from utils.dataPipeline import check_ollama_model_exists
@@ -82,8 +82,8 @@ class RAG(adal.Component):
 
         # Initialize embedder for queries (single string only for Ollama)
         self.embedder = adal.Embedder(
-            model_client=Const.EMBEDDING_CONFIG["client"],
-            model_kwargs=Const.EMBEDDING_CONFIG["model_kwargs"]
+            model_client=Config.get_embedding_config()["client"],
+            model_kwargs=Config.get_embedding_config()["model_kwargs"]
         )
         
         # Create a single-string embedder wrapper for Ollama compatibility
@@ -124,10 +124,10 @@ FORMATTING RULES:
                 "system_prompt": RAG_SYSTEM_PROMPT,
                 "contexts": None,
             },
-            model_client=Const.EMBEDDING_CONFIG["client"],
+            model_client=Config.get_embedding_config()["client"],
             model_kwargs={
                 "model": self.model,
-                "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
+                "keep_alive": Config.OLLAMA_KEEP_ALIVE  # Keep model loaded
             },
             output_processors=data_parser,
         )
@@ -284,7 +284,7 @@ FORMATTING RULES:
         try:
             # FAISS retriever configuration
             retriever_config = {
-                "top_k": Const.RAG_TOP_K,
+                "top_k": Config.RAG_TOP_K,
                 "dimensions": 768,  # nomic-embed-text dimension
                 "metric": "cosine"
             }

@@ -6,6 +6,10 @@ backend/data
 # all .pyc files
 **/*.pyc
 
+# Environment files - NEVER commit these
+**/.env
+!**/.env.example
+
 # frontend ignores
 frontend/node_modules
 frontend/build

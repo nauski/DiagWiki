@@ -11,13 +11,12 @@ from utils.dataPipeline import check_ollama_model_exists, get_all_ollama_models,
 from utils.wiki_generator import WikiGenerator
 
 from const.config import Config, APP_NAME, APP_VERSION
-from const.const import Const
 
 
 logger = logging.getLogger(__name__)
 
 # Create a thread pool executor for blocking operations
-executor = ThreadPoolExecutor(max_workers=Const.MAX_WORKERS)
+executor = ThreadPoolExecutor(max_workers=Config.MAX_WORKERS)
 
 
 @asynccontextmanager
@@ -66,17 +65,17 @@ async def health_check():
 async def get_constants():
     """Get backend constants for frontend to use."""
     return {
-        "MAX_RAG_CONTEXT_CHARS": Const.MAX_RAG_CONTEXT_CHARS,
-        "MAX_SOURCES": Const.MAX_SOURCES,
-        "MAX_FILE_CHARS": Const.MAX_FILE_CHARS,
-        "RAG_TOP_K": Const.RAG_TOP_K,
-        "SOURCE_PREVIEW_LENGTH": Const.SOURCE_PREVIEW_LENGTH,
-        "DEFAULT_TEMPERATURE": Const.DEFAULT_TEMPERATURE,
-        "FOCUSED_TEMPERATURE": Const.FOCUSED_TEMPERATURE,
-        "LARGE_CONTEXT_WINDOW": Const.LARGE_CONTEXT_WINDOW,
-        "LLM_TIMEOUT": Const.LLM_TIMEOUT,
-        "GENERATION_MODEL": Const.GENERATION_MODEL,
-        "EMBEDDING_MODEL": Const.EMBEDDING_MODEL
+        "MAX_RAG_CONTEXT_CHARS": Config.MAX_RAG_CONTEXT_CHARS,
+        "MAX_SOURCES": Config.MAX_SOURCES,
+        "MAX_FILE_CHARS": Config.MAX_FILE_CHARS,
+        "RAG_TOP_K": Config.RAG_TOP_K,
+        "SOURCE_PREVIEW_LENGTH": Config.SOURCE_PREVIEW_LENGTH,
+        "DEFAULT_TEMPERATURE": Config.DEFAULT_TEMPERATURE,
+        "FOCUSED_TEMPERATURE": Config.FOCUSED_TEMPERATURE,
+        "LARGE_CONTEXT_WINDOW": Config.LARGE_CONTEXT_WINDOW,
+        "LLM_TIMEOUT": Config.LLM_TIMEOUT,
+        "GENERATION_MODEL": Config.GENERATION_MODEL,
+        "EMBEDDING_MODEL": Config.EMBEDDING_MODEL
     }
 
 # Root endpoint
@@ -144,8 +143,8 @@ async def get_file_content(
 async def list_available_models():
     """Get list of all available Ollama models"""
     models = get_all_ollama_models()
-    embedding_model = Const.EMBEDDING_CONFIG['model_kwargs'].get('model', 'nomic-embed-text')
-    generation_model = Const.GENERATION_MODEL
+    embedding_model = Config.get_embedding_config()['model_kwargs'].get('model', 'nomic-embed-text')
+    generation_model = Config.GENERATION_MODEL
     
     return {
         "available_models": models,
@@ -240,8 +239,8 @@ async def init_wiki(
             "database_existed": db_exists,
             "rag_ready": True,
             "document_count": len(rag.transformed_docs),
-            "embedding_model": Const.EMBEDDING_CONFIG['model_kwargs']['model'],
-            "generation_model": Const.GENERATION_MODEL,
+            "embedding_model": Config.get_embedding_config()['model_kwargs']['model'],
+            "generation_model": Config.GENERATION_MODEL,
             "file_types": file_types
         }
         
@@ -345,8 +344,8 @@ async def query_wiki(
             "sources": sources,
             "retrieval_method": "hybrid (semantic + BM25)" if use_reranking else "semantic only",
             "model": {
-                "embedding": Const.EMBEDDING_CONFIG['model_kwargs']['model'],
-                "generation": Const.GENERATION_MODEL
+                "embedding": Config.get_embedding_config()['model_kwargs']['model'],
+                "generation": Config.GENERATION_MODEL
             }
         }
         

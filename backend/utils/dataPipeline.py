@@ -2,7 +2,7 @@ import os
 import hashlib, re
 import requests
 import logging
-from const.const import Const
+from const.config import Config
 import adalflow as adal
 from adalflow.core.component import DataComponent
 from adalflow.core.types import Document
@@ -147,8 +147,8 @@ class OllamaDocumentProcessor(DataComponent):
                 
                 logger.debug(f"Processing '{file_path}': {token_count} tokens, {len(doc.text)} chars")
                 
-                if token_count > Const.MAX_EMBEDDING_TOKENS:
-                    logger.warning(f"Document '{file_path}' has {token_count} tokens which exceeds embedding model context limit ({Const.MAX_EMBEDDING_TOKENS}), skipping")
+                if token_count > Config.MAX_EMBEDDING_TOKENS:
+                    logger.warning(f"Document '{file_path}' has {token_count} tokens which exceeds embedding model context limit ({Config.MAX_EMBEDDING_TOKENS}), skipping")
                     skipped_large_docs += 1
                     continue
                 
@@ -188,7 +188,7 @@ class OllamaDocumentProcessor(DataComponent):
                     logger.error(f"Error processing document '{file_path}': {e}, skipping")
 
         if skipped_large_docs > 0:
-            logger.info(f"Skipped {skipped_large_docs} documents that exceeded token limit ({Const.MAX_EMBEDDING_TOKENS} tokens)")
+            logger.info(f"Skipped {skipped_large_docs} documents that exceeded token limit ({Config.MAX_EMBEDDING_TOKENS} tokens)")
         logger.info(f"Successfully processed {len(successful_docs)}/{len(output)} documents with consistent embeddings")
         return successful_docs
 
@@ -212,13 +212,13 @@ class DataPipeline:
             }
         else:
             embedder_kwargs = {
-                "model_client": Const.EMBEDDING_CONFIG.get("client", adal.OllamaClient()),
-                "model_kwargs": Const.EMBEDDING_CONFIG['model_kwargs']
+                "model_client": Config.get_embedding_config().get("client", adal.OllamaClient()),
+                "model_kwargs": Config.get_embedding_config()['model_kwargs']
             }
         
         self.embedder = adal.Embedder(**embedder_kwargs)
         
-        split_config = text_splitter_config if text_splitter_config else Const.TEXT_SPLIT_CONFIG
+        split_config = text_splitter_config if text_splitter_config else Config.get_text_split_config()
         self.splitter = TextSplitter(**split_config)
         
         self.embedder_transformer = OllamaDocumentProcessor(embedder=self.embedder)

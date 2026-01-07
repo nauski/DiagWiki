@@ -1,6 +1,7 @@
 import os
 import logging
 from const.const import Const
+from const.config import Config
 from adalflow.core.types import Document
 import tiktoken
 
@@ -8,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class RepoUtil:
     """Utility class for repository operations"""
-    MAX_TOKEN_LIMIT = Const.MAX_TOKEN_LIMIT
+    MAX_TOKEN_LIMIT = Config.MAX_TOKEN_LIMIT
 
     @staticmethod
     def build_tree(current_path):

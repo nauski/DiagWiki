@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Dict, List
 from adalflow.core.types import ModelType
-from const.const import Const, get_llm_client
+from const.config import Config
 from const.prompts import (
     build_page_analysis_queries,
     build_diagram_sections_prompt_iteration1,
@@ -114,7 +114,7 @@ class WikiDiagramGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=Const.RAG_SECTION_ITERATION_TOP_K,  # Use higher top_k for section identification
+                    top_k=Config.RAG_SECTION_ITERATION_TOP_K,  # Use higher top_k for section identification
                     use_reranking=True
                 )
                 rag_results.append({
@@ -154,10 +154,10 @@ class WikiDiagramGenerator:
         # This gives the LLM access to more source code for better refinement
         comprehensive_query = f"Provide a comprehensive overview of the {repo_name} codebase structure, main components, architecture, and key files."
         try:
-            logger.info(f"Performing comprehensive RAG query for iteration 2 with top_k={Const.RAG_SECTION_ITERATION_TOP_K}")
+            logger.info(f"Performing comprehensive RAG query for iteration 2 with top_k={Config.RAG_SECTION_ITERATION_TOP_K}")
             answer, comprehensive_docs = self.rag.call(
                 query=comprehensive_query,
-                top_k=Const.RAG_SECTION_ITERATION_TOP_K,  # Higher top_k for comprehensive view
+                top_k=Config.RAG_SECTION_ITERATION_TOP_K,  # Higher top_k for comprehensive view
                 use_reranking=True
             )
             all_retrieved_docs.extend(comprehensive_docs)
@@ -279,15 +279,15 @@ class WikiDiagramGenerator:
     
     def _call_llm_for_sections(self, prompt: str, iteration_name: str, return_full: bool = False) -> any:
         """Helper method to call LLM for section identification iterations."""
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "format": "json",
             "options": {
-                "temperature": Const.DEFAULT_TEMPERATURE,
-                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+                "temperature": Config.DEFAULT_TEMPERATURE,
+                "num_ctx": Config.LARGE_CONTEXT_WINDOW
             },
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
@@ -568,14 +568,14 @@ Requirements:
 Return ONLY the title text, nothing else."""
 
         # Use get_llm_client() for proper timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "options": {
-                "temperature": Const.FOCUSED_TEMPERATURE,
-                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+                "temperature": Config.FOCUSED_TEMPERATURE,
+                "num_ctx": Config.LARGE_CONTEXT_WINDOW
             },
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE  # Keep model loaded
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
@@ -647,7 +647,7 @@ Return ONLY the title text, nothing else."""
         try:
             answer, retrieved_docs = self.rag.call(
                 query=comprehensive_query,
-                top_k=Const.RAG_TOP_K,
+                top_k=Config.RAG_TOP_K,
                 use_reranking=True
             )
             # Validate answer is not None
@@ -672,9 +672,9 @@ Return ONLY the title text, nothing else."""
             part = f"Query: {r['query']}\nAnswer: {r['answer']}\nRationale: {r['rationale']}"
             part_length = len(part)
             
-            if current_length + part_length > Const.MAX_RAG_CONTEXT_CHARS:
+            if current_length + part_length > Config.MAX_RAG_CONTEXT_CHARS:
                 # Truncate last part to fit
-                remaining = Const.MAX_RAG_CONTEXT_CHARS - current_length
+                remaining = Config.MAX_RAG_CONTEXT_CHARS - current_length
                 if remaining > 100:  # Only add if meaningful space left
                     truncated = part[:remaining] + "\n\n[... truncated for size limits ...]"
                     rag_context_parts.append(truncated)
@@ -697,8 +697,8 @@ Return ONLY the title text, nothing else."""
         
         # Also limit retrieved sources to prevent overflow
         retrieved_sources = "\n\n".join([
-            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:Const.SOURCE_PREVIEW_LENGTH]}"
-            for i, doc in enumerate(unique_docs[:Const.MAX_SOURCES])
+            f"Source {i+1} ({doc.meta_data.get('file_path', 'unknown') if hasattr(doc, 'meta_data') else 'unknown'}):\n{doc.text[:Config.SOURCE_PREVIEW_LENGTH]}"
+            for i, doc in enumerate(unique_docs[:Config.MAX_SOURCES])
         ])
         logger.info(f"Retrieved sources size: {len(retrieved_sources)} chars (~{len(retrieved_sources)//4} tokens)")
         
@@ -766,7 +766,7 @@ Return ONLY the title text, nothing else."""
             rag_context_parts.append(f"File: {file_path}\n{file_content}")
             
             # Add to sources with preview
-            preview = file_content[:Const.SOURCE_PREVIEW_LENGTH]
+            preview = file_content[:Config.SOURCE_PREVIEW_LENGTH]
             retrieved_sources_parts.append(
                 f"Source {source_idx} ({file_path}): {len(chunks)} segments\n{preview}"
             )
@@ -811,8 +811,8 @@ Return ONLY the title text, nothing else."""
                     content = f.read()
                 
                 # Truncate if too large
-                if len(content) > Const.MAX_FILE_CHARS:
-                    content = content[:Const.MAX_FILE_CHARS] + "\n\n[... truncated for size limits ...]"
+                if len(content) > Config.MAX_FILE_CHARS:
+                    content = content[:Config.MAX_FILE_CHARS] + "\n\n[... truncated for size limits ...]"
                 
                 # Create mock document
                 doc = Document(
@@ -826,7 +826,7 @@ Return ONLY the title text, nothing else."""
                 
                 # Add to sources (with preview)
                 retrieved_sources_parts.append(
-                    f"Source {i+1} ({file_path}):\n{content[:Const.SOURCE_PREVIEW_LENGTH]}"
+                    f"Source {i+1} ({file_path}):\n{content[:Config.SOURCE_PREVIEW_LENGTH]}"
                 )
                 
                 logger.info(f"Read reference file: {file_path} ({len(content)} chars)")
@@ -859,15 +859,15 @@ Return ONLY the title text, nothing else."""
             logger.warning(f"⚠️  Prompt exceeds 75% of context window. Processing may be slow.")
         
         # Use get_llm_client() for proper timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "format": "json",
             "options": {
-                "temperature": Const.DEFAULT_TEMPERATURE,
-                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+                "temperature": Config.DEFAULT_TEMPERATURE,
+                "num_ctx": Config.LARGE_CONTEXT_WINDOW
             },
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE  # Keep model loaded
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE  # Keep model loaded
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(

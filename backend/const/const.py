@@ -1,35 +1,15 @@
-from adalflow.components.model_client.ollama_client import OllamaClient as _AdalOllamaClient
-import ollama
-
-
-class TimeoutOllamaClient(_AdalOllamaClient):
-    """
-    OllamaClient with configurable timeout.
-    
-    The base AdalFlow OllamaClient doesn't expose timeout configuration,
-    so we override the init methods to add it.
-    """
-    
-    def __init__(self, host: str = None, timeout: float = None):
-        """Initialize with optional timeout."""
-        self._timeout = timeout
-        super().__init__(host=host)
-    
-    def init_sync_client(self):
-        """Create the synchronous client with timeout."""
-        self.sync_client = ollama.Client(
-            host=self._host,
-            timeout=self._timeout
-        )
-    
-    def init_async_client(self):
-        """Create the async client with timeout."""
-        self.async_client = ollama.AsyncClient(
-            host=self._host,
-            timeout=self._timeout
-        )
+# Import configuration from config module
+# All configurable values are now in config.py and loaded from .env
 
 class Const:
+    """
+    Application constants that don't require configuration.
+    
+    For configurable values (model names, timeouts, RAG settings, etc.),
+    use Config class from config.py which loads from environment variables.
+    """
+    
+    # File extensions to process
     CODE_EXTENSIONS = [
         ".py", ".js", ".ts", ".java", ".cpp", ".c", ".h", ".hpp", ".go", ".rs",
         ".jsx", ".tsx", ".html", ".css", ".php", ".swift", ".cs", ".svelte", ".rb",
@@ -40,12 +20,14 @@ class Const:
         # Config as Code
         ".tf", ".hcl", ".dockerfile"
     ]
+    
     DOC_EXTENSIONS = [
         ".md", ".txt", ".rst", ".json", ".yaml", ".yml",
         # Configuration & Schema
         ".toml", ".ini", ".conf", ".cfg", ".xml", ".csv", ".tsv",
         ".env.example", ".lock", ".jsonl", ".proto"
     ]
+    
     DIR_SKIP_LIST = [
         "node_modules", "venv", "__pycache__", ".git", "dist", "build", ".venv",
         # IDEs & System
@@ -59,98 +41,3 @@ class Const:
         # Mobile Artifacts
         "Pods", "DerivedData", ".gradle"
     ]
-
-    # ============================================================
-    # LLM Configuration - IMPORTANT FOR RELIABILITY
-    # ============================================================
-    # Timeout (seconds) for LLM API calls
-    # This prevents indefinite hangs when Ollama is busy or reloading models
-    LLM_TIMEOUT = 120.0  # 2 minutes - enough for model reload + generation
-    
-    # Keep-alive duration for Ollama models (prevents frequent reloads)
-    # Set to "10m" to keep model loaded for 10 minutes after last request
-    # This reduces cold-start delays significantly for the 30B model
-    OLLAMA_KEEP_ALIVE = "10m"
-    
-    # Host configuration
-    OLLAMA_HOST = "http://localhost:11434"
-
-    EMBEDDING_CONFIG = {
-        "client": TimeoutOllamaClient(timeout=30.0),  # Embeddings are fast, shorter timeout
-        "model_kwargs": {
-            "model": "nomic-embed-text",
-            "keep_alive": "10m"  # Keep embedding model loaded
-        }
-    }
-
-    TEXT_SPLIT_CONFIG = {
-        "split_by": "token",
-        "chunk_size": 1000,
-        "chunk_overlap": 50,
-    }
-
-    GENERATION_MODEL = "qwen3-coder:30b"
-    EMBEDDING_MODEL = "nomic-embed-text"
-
-    # ============================================================
-    # RAG Configuration
-    # ============================================================
-    # Maximum characters for RAG context to prevent LLM overflow
-    MAX_RAG_CONTEXT_CHARS = 100000  # ~25K tokens
-    
-    # Maximum number of source files to include in RAG context
-    MAX_SOURCES = 40
-    
-    # Maximum characters per file when reading manual references
-    MAX_FILE_CHARS = 50000
-    
-    # Default top_k for RAG queries
-    RAG_TOP_K = 40
-    
-    # Special top_k for section identification iterations (higher to get comprehensive view)
-    RAG_SECTION_ITERATION_TOP_K = 80
-    
-    # Maximum tokens for document chunking
-    MAX_TOKEN_LIMIT = 8192
-    
-    # Maximum tokens for embedding (to prevent overflow)
-    MAX_EMBEDDING_TOKENS = 6000
-    
-    # Preview length for file sources
-    SOURCE_PREVIEW_LENGTH = 600
-
-    # ============================================================
-    # LLM Generation Parameters
-    # ============================================================
-    # Default temperature for creative generation (diagrams, wiki)
-    DEFAULT_TEMPERATURE = 0.7
-    
-    # Lower temperature for focused tasks (title generation)
-    FOCUSED_TEMPERATURE = 0.3
-    
-    # Context window size - use large window for all operations
-    LARGE_CONTEXT_WINDOW = 16384
-    
-    # ============================================================
-    # API Configuration
-    # ============================================================
-    # Thread pool size for async operations
-    MAX_WORKERS = 4
-
-
-def get_llm_client():
-    """
-    Get an OllamaClient configured with proper timeout.
-    
-    This prevents indefinite hangs when:
-    - Ollama server is busy
-    - Model needs to be reloaded (cold start)
-    - Network issues occur
-    
-    Returns:
-        TimeoutOllamaClient with timeout configured
-    """
-    return TimeoutOllamaClient(
-        host=Const.OLLAMA_HOST,
-        timeout=Const.LLM_TIMEOUT
-    )

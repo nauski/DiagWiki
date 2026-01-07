@@ -21,7 +21,7 @@ from utils.dataPipeline import DataPipeline, generate_db_name
 from utils.wiki_cache import WikiCache
 from utils.wiki_rag import WikiRAGQuery
 from utils.wiki_diagram import WikiDiagramGenerator
-from const.const import Const
+from const.config import Config
 from const.prompts import (
     build_wiki_structure_prompt,
     build_wiki_page_prompt,
@@ -29,7 +29,6 @@ from const.prompts import (
     build_page_analysis_queries
 )
 from adalflow.core.types import ModelType
-from const.const import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +160,8 @@ class WikiGenerator:
             logger.info(f"Database file not found at {db_file}, creating...")
             pipeline = DataPipeline(
                 db_name=self.db_name,
-                embedder_model=Const.EMBEDDING_MODEL,
-                text_splitter_config=Const.TEXT_SPLIT_CONFIG
+                embedder_model=Config.EMBEDDING_MODEL,
+                text_splitter_config=Config.get_text_split_config()
             )
             result = pipeline.process_folder(
                 folder_path=self.root_path,
@@ -248,7 +247,7 @@ class WikiGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=Const.RAG_TOP_K,
+                    top_k=Config.RAG_TOP_K,
                     use_reranking=True
                 )
                 rag_insights.append({
@@ -272,14 +271,14 @@ class WikiGenerator:
         )
         
         # Call LLM with timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "options": {
-                "temperature": Const.DEFAULT_TEMPERATURE,
-                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+                "temperature": Config.DEFAULT_TEMPERATURE,
+                "num_ctx": Config.LARGE_CONTEXT_WINDOW
             },
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
@@ -371,7 +370,7 @@ class WikiGenerator:
             try:
                 answer, retrieved_docs = self.rag.call(
                     query=query,
-                    top_k=Const.RAG_TOP_K,
+                    top_k=Config.RAG_TOP_K,
                     use_reranking=True
                 )
                 rag_results.append({
@@ -434,14 +433,14 @@ class WikiGenerator:
         )
         
         # Call LLM with timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "options": {
-                "temperature": Const.DEFAULT_TEMPERATURE,
-                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+                "temperature": Config.DEFAULT_TEMPERATURE,
+                "num_ctx": Config.LARGE_CONTEXT_WINDOW
             },
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
@@ -616,7 +615,7 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=user_prompt,
-                top_k=Const.RAG_TOP_K,
+                top_k=Config.RAG_TOP_K,
                 use_reranking=True
             )
             
@@ -637,16 +636,16 @@ class WikiGenerator:
         )
         
         # Stream from Ollama
-        client = ollama.Client(host=Const.OLLAMA_HOST, timeout=Const.LLM_TIMEOUT)
+        client = ollama.Client(host=Config.OLLAMA_HOST, timeout=Config.LLM_TIMEOUT)
         
         stream_response = client.chat(
-            model=Const.GENERATION_MODEL,
+            model=Config.GENERATION_MODEL,
             messages=[{"role": "user", "content": prompt}],
             stream=True,
             format="json",
             options={
-                "temperature": Const.DEFAULT_TEMPERATURE,
-                "num_ctx": Const.LARGE_CONTEXT_WINDOW
+                "temperature": Config.DEFAULT_TEMPERATURE,
+                "num_ctx": Config.LARGE_CONTEXT_WINDOW
             }
         )
         
@@ -703,7 +702,7 @@ class WikiGenerator:
         try:
             rag_answer, codebase_docs = self.rag.call(
                 query=user_prompt,
-                top_k=Const.RAG_TOP_K,
+                top_k=Config.RAG_TOP_K,
                 use_reranking=True
             )
             
@@ -724,12 +723,12 @@ class WikiGenerator:
         )
         
         # Call LLM with timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "format": "json",
-            "options": {"temperature": Const.DEFAULT_TEMPERATURE, "num_ctx": Const.LARGE_CONTEXT_WINDOW},
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE
+            "options": {"temperature": Config.DEFAULT_TEMPERATURE, "num_ctx": Config.LARGE_CONTEXT_WINDOW},
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
@@ -887,7 +886,7 @@ class WikiGenerator:
             try:
                 rag_answer, codebase_docs = self.rag.call(
                     query=prompt,
-                    top_k=Const.RAG_TOP_K,
+                    top_k=Config.RAG_TOP_K,
                     use_reranking=True
                 )
                 
@@ -909,12 +908,12 @@ class WikiGenerator:
         )
         
         # Call LLM with timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "format": "json",
-            "options": {"temperature": Const.DEFAULT_TEMPERATURE, "num_ctx": Const.LARGE_CONTEXT_WINDOW},
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE
+            "options": {"temperature": Config.DEFAULT_TEMPERATURE, "num_ctx": Config.LARGE_CONTEXT_WINDOW},
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
@@ -1086,7 +1085,7 @@ class WikiGenerator:
             try:
                 rag_answer, codebase_docs = self.rag.call(
                     query=f"{existing_content.get('section_title', '')} {modification_prompt}",
-                    top_k=Const.RAG_TOP_K,
+                    top_k=Config.RAG_TOP_K,
                     use_reranking=True
                 )
                 
@@ -1108,12 +1107,12 @@ class WikiGenerator:
         )
         
         # Call LLM with timeout configuration
-        model = get_llm_client()
+        model = Config.get_llm_client()
         model_kwargs = {
-            "model": Const.GENERATION_MODEL,
+            "model": Config.GENERATION_MODEL,
             "format": "json",
-            "options": {"temperature": Const.DEFAULT_TEMPERATURE, "num_ctx": Const.LARGE_CONTEXT_WINDOW},
-            "keep_alive": Const.OLLAMA_KEEP_ALIVE
+            "options": {"temperature": Config.DEFAULT_TEMPERATURE, "num_ctx": Config.LARGE_CONTEXT_WINDOW},
+            "keep_alive": Config.OLLAMA_KEEP_ALIVE
         }
         
         api_kwargs = model.convert_inputs_to_api_kwargs(
