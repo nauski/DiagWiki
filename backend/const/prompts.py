@@ -1508,53 +1508,115 @@ def build_wiki_creation_prompt(
         diagram_type_instruction = 'Choose the most appropriate diagram type for the content'
         diagram_type_field = '"diagram_type": "flowchart|sequence|class|stateDiagram|erDiagram",'
     
-    prompt = f"""You are creating a new wiki section for a codebase documentation system.
+    prompt = f"""You are an expert technical documentation architect creating a COMPREHENSIVE diagram for a professional codebase wiki.
 
-SECTION NAME: {wiki_name}
+🎯 CRITICAL CONTEXT: This diagram will be the PRIMARY DOCUMENTATION for this section.
+Users will rely on it to understand complex system architecture, data flows, and component relationships.
+Your diagram must be thorough, detailed, and production-grade - not a simplified overview.
 
-REQUIREMENTS:
-{creation_prompt}
+═══════════════════════════════════════════════════════════════════════════════
 
-RELEVANT CODEBASE:
+SECTION DETAILS:
+• Section Name: {wiki_name}
+• Requirements: {creation_prompt}
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CODEBASE ANALYSIS (Your Primary Source of Truth):
 {codebase_context}
 
-Generate a diagram section with the following JSON structure:
+═══════════════════════════════════════════════════════════════════════════════
+
+🚨 CRITICAL QUALITY REQUIREMENTS:
+
+1. COMPREHENSIVE COVERAGE
+   ✓ Map out ALL major components and their relationships found in the codebase
+   ✓ Show parallel paths, alternative flows, and edge cases - not just the happy path
+   ✓ Include error handling, validation steps, and side effects
+   ✓ Represent the ACTUAL complexity of the system (10-25+ nodes for complex systems)
+   ✓ Think: "Does this diagram show everything a developer needs to understand this system?"
+
+2. DEPTH OVER SIMPLICITY
+   ✓ Don't reduce complex architectures to 5-7 nodes - that's oversimplification
+   ✓ Show internal component structure, not just high-level boxes
+   ✓ Include data transformations, processing steps, and intermediate states
+   ✓ Reveal the layered architecture and component hierarchies
+   ✓ Use subgraphs to organize related components when beneficial
+
+3. REAL COMPONENT NAMES
+   ✓ Extract actual class names, function names, and module names from the codebase
+   ✓ Use specific identifiers (e.g., "UserAuthService", "validateRequest()") not generic labels ("Service", "Process")
+   ✓ Reference real file paths, API endpoints, and database tables
+   ✓ Every node should be traceable back to concrete code elements
+
+4. COMPLETE RELATIONSHIP MAPPING
+   ✓ Show all significant dependencies, not just main flow
+   ✓ Include conditional branches and decision points with clear conditions
+   ✓ Document data flow directions and transformation steps
+   ✓ Add meaningful edge labels that explain WHY connections exist
+   ✓ Capture asynchronous operations, callbacks, and event-driven patterns
+
+5. PRODUCTION-QUALITY DETAILS
+   ✓ Add explanatory notes for complex subsystems
+   ✓ Use appropriate diagram features (subgraphs, annotations, groupings)
+   ✓ Ensure logical layout that guides understanding (left-to-right or top-to-bottom flow)
+   ✓ Balance detail density - pack information without cluttering
+
+═══════════════════════════════════════════════════════════════════════════════
+
+TECHNICAL SPECIFICATIONS:
+
+Output JSON Structure:
 {{
     "section_id": "{wiki_name}",
-    "section_title": "Human-readable title",
-    "section_description": "What this diagram explains",
+    "section_title": "Precise, descriptive title reflecting scope",
+    "section_description": "2-3 sentences explaining what this diagram documents and why it matters",
     {diagram_type_field}
-    "key_concepts": ["concept1", "concept2", "concept3"],
-    "mermaid_code": "Complete Mermaid diagram code here",
-    "diagram_description": "What the diagram shows",
+    "key_concepts": ["concept1", "concept2", "concept3", "concept4", "concept5"],
+    "mermaid_code": "Comprehensive Mermaid diagram with 10-25+ nodes for complex systems",
+    "diagram_description": "Detailed explanation of diagram structure and what it reveals",
     "node_explanations": {{
-        "nodeId": "What this component does"
+        "nodeId": "Clear explanation of component purpose, responsibilities, and role in system"
     }},
     "edge_explanations": {{
-        "source->target": "What this relationship means"
+        "source->target": "Precise description of relationship, data flow, or interaction"
     }}
 }}
 
-Guidelines:
-- {diagram_type_instruction}
-- Include 5-10 key concepts
-- Generate valid Mermaid syntax
-- Provide detailed explanations for all nodes and edges
-- Base content on the codebase context provided
-- STYLING RULES (Professional Style):
-  * Use MINIMAL and SELECTIVE coloring - most nodes should use default styling
-  * Apply colors ONLY to emphasize critical nodes (entry points, error states, key decision points)
-  * Use a consistent, muted color palette:
-    - Entry/Start points: style X fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    - Error/Critical states: style Y fill:#ffebee,stroke:#c62828,stroke-width:2px
-    - Success/End states: style Z fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    - Key decision points: style W fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
-  * NO random rainbow colors (avoid #f0f8ff, #ffe4b5, #98fb98, #ff6347, #87ceeb, #9370db, etc.)
-  * Leave most nodes unstyled for a clean, professional appearance
+Diagram Type: {diagram_type_instruction}
 
-IMPORTANT: Generate the content in {language_name} language.
+STYLING GUIDELINES:
+• Use MINIMAL, SELECTIVE coloring - most nodes default-styled for clarity
+• Apply color ONLY to emphasize critical nodes:
+  - Entry/Start: style X fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+  - Error/Critical: style Y fill:#ffebee,stroke:#c62828,stroke-width:2px  
+  - Success/End: style Z fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+  - Key Decisions: style W fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+• Avoid random rainbow colors (#f0f8ff, #ffe4b5, #98fb98, etc.)
+• Style at most 3-5 critical nodes per diagram for professional appearance
 
-Respond with valid JSON only:"""
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ ANTI-PATTERNS TO AVOID:
+✗ Linear single-path diagrams (A→B→C→D) for complex systems
+✗ Generic node labels ("Process", "Handler", "Service") instead of actual names
+✗ Omitting error handling, validation, or alternative flows
+✗ Oversimplifying 50+ component systems into 5 nodes
+✗ Missing conditional logic and branching paths
+✗ Vague edge labels or unlabeled critical connections
+
+✓ SUCCESS INDICATORS:
+✓ Diagram has appropriate complexity matching the actual system
+✓ A developer could implement the system from this diagram alone
+✓ All major code elements from codebase context are represented
+✓ Edge cases, errors, and alternative paths are documented
+✓ Component relationships accurately reflect code dependencies
+
+═══════════════════════════════════════════════════════════════════════════════
+
+IMPORTANT: Generate all content in {language_name} language.
+
+Respond with valid JSON only (no markdown code blocks):"""
     
     return prompt
 
