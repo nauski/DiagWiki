@@ -17,6 +17,17 @@ DiagWiki solves this by:
 - **Interactive** - click components for detailed explanations
 - **Always current** - regenerate anytime your code changes
 
+## Use DiagWiki to visualize this project itself
+
+### API Call Workflow for Diagram Generation
+![api-call-flow](/imgs/api-call-workflow-for-diagram-generation.svg)
+
+### Backend Architecture
+![backend-architecture](/imgs/backend-api-architecture.svg)
+
+### UI State Management and Caching
+![ui-state-management](/imgs/ui-state-management-and-caching.svg)
+
 ## How to Start
 
 ### Prerequisites

@@ -1514,8 +1514,6 @@ def build_wiki_creation_prompt(
 Users will rely on it to understand complex system architecture, data flows, and component relationships.
 Your diagram must be thorough, detailed, and production-grade - not a simplified overview.
 
-═══════════════════════════════════════════════════════════════════════════════
-
 SECTION DETAILS:
 • Section Name: {wiki_name}
 • Requirements: {creation_prompt}
@@ -1524,8 +1522,6 @@ SECTION DETAILS:
 
 CODEBASE ANALYSIS (Your Primary Source of Truth):
 {codebase_context}
-
-═══════════════════════════════════════════════════════════════════════════════
 
 🚨 CRITICAL QUALITY REQUIREMENTS:
 
