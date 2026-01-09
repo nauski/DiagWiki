@@ -98,6 +98,42 @@
 		return [];
 	}
 
+	async function toggleFolderSelection(event: CustomEvent) {
+		const folderNode = event.detail;
+		const filesInFolder = collectFiles(folderNode);
+		
+		// Check if all files are selected
+		const allSelected = filesInFolder.every(f => selectedFiles.includes(f));
+		
+		if (allSelected) {
+			// Deselect all
+			selectedFiles = selectedFiles.filter(f => !filesInFolder.includes(f));
+			filesInFolder.forEach(f => selectedFileSizes.delete(f));
+		} else {
+			// Select all
+			const newFiles = filesInFolder.filter(f => !selectedFiles.includes(f));
+			selectedFiles = [...selectedFiles, ...newFiles];
+			
+			// Fetch sizes for new files
+			for (const filePath of newFiles) {
+				try {
+					const params = new URLSearchParams({
+						root: $currentProject || '',
+						path: filePath
+					});
+					const fileResponse = await fetch(`http://localhost:8001/file_content?${params}`);
+					if (fileResponse.ok) {
+						const data = await fileResponse.json();
+						selectedFileSizes.set(filePath, data.content?.length || 0);
+					}
+				} catch (err) {
+					selectedFileSizes.set(filePath, 5000);
+				}
+			}
+		}
+		selectedFileSizes = selectedFileSizes;
+	}
+
 	$: if (referenceMode === 'manual' && !fileTree) {
 		loadFileTree();
 	}
@@ -398,6 +434,7 @@
 									node={fileTree} 
 									{selectedFiles}
 									on:toggle={(e) => toggleFileSelection(e.detail)}
+									on:toggleFolder={toggleFolderSelection}
 								/>
 							{:else}
 								<p class="text-xs text-gray-500 p-2">Loading files...</p>
