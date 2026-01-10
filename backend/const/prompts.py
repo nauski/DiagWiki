@@ -631,6 +631,9 @@ Available code files in the repository:
 
 {files_text}
 
+⚠️ CRITICAL REQUIREMENT: You MUST return ALL {len(refined_sections)} sections from iteration 2.
+DO NOT merge, combine, or omit any sections. Each section must be preserved individually.
+
 Your task is to ASSIGN relevant code files to each section:
 
 ASSIGNMENT GUIDELINES:
@@ -641,6 +644,7 @@ ASSIGNMENT GUIDELINES:
    - What key concepts/components does this file provide?
    - How does it connect to other files in this section?
    - Why is it important for this diagram?
+5. **PRESERVE ALL SECTIONS**: Return exactly {len(refined_sections)} sections - one for each input section
 
 FILE_REFERENCES FORMAT:
 For each section, provide a file_references string that:
@@ -674,8 +678,14 @@ Return sections with file assignments in the following JSON format:
 5. Do NOT omit any fields - every section MUST have all 5 fields
 6. Use proper JSON syntax with double quotes and correct commas
 7. diagram_type must be one of: flowchart, sequence, class, stateDiagram, erDiagram
+8. **RETURN ALL {len(refined_sections)} SECTIONS** - do not merge, combine, or omit any sections
 
 Generate the final analysis in {language_name} language.
+
+⚠️ FINAL CHECK BEFORE RETURNING:
+- Count: Did you return exactly {len(refined_sections)} sections?
+- Fields: Does each section have all 5 required fields?
+- If not, FIX IT NOW before returning!
 
 Assign files now:"""
     
@@ -789,6 +799,23 @@ def build_single_diagram_prompt(
    - Node[Process Data]    ← spaces OK
    
 💎 GOLDEN RULE: If label has ANY special char, USE QUOTES: Node["Your Label"]
+
+🚫 LABELED EDGES - CRITICAL SYNTAX ERROR TO AVOID:
+   ❌ WRONG: A -->|Label| --> B    ← DOUBLE ARROW ERROR - Parser fails!
+   ❌ WRONG: A --|Label| -- B      ← DOUBLE DASH ERROR
+   ❌ WRONG: A ==>|Label| ==> B    ← DOUBLE THICK ERROR
+   ✅ RIGHT: A -->|Label| B        ← Single arrow with label
+   ✅ RIGHT: A --|Label| B         ← Single dash with label
+   ✅ RIGHT: A ==>|Label| B        ← Single thick arrow with label
+   
+   EXPLANATION: The -->|Label| syntax ALREADY creates the arrow.
+   Adding another --> is redundant and causes "syntax error" in Mermaid.
+   
+   EXAMPLES OF CORRECT USAGE:
+   - Decision branches: Decision{Question?} -->|Yes| ActionA
+   - Conditional flow: Check -->|Valid| Process
+   - Labeled steps: Step1 -->|Success| Step2
+
 - STYLING RULES (Premium Professional Style):
   * Use MINIMAL and SELECTIVE coloring - most nodes should use default styling
   * Apply colors ONLY to emphasize critical nodes (entry points, error states, key decision points)
@@ -897,7 +924,10 @@ def build_single_diagram_prompt(
     specific_instructions = diagram_instructions.get(diagram_type, diagram_instructions["flowchart"])
     required_syntax = diagram_syntax.get(diagram_type, "flowchart")
     
-    prompt = f"""You are an expert at creating clear, informative Mermaid diagrams for a DIAGRAM-FIRST WIKI.
+    prompt = f"""⚠️ LANGUAGE REQUIREMENT: Generate ALL content in {language_name} language ({language}).
+This includes: diagram descriptions, node explanations, edge explanations, and all text.
+
+You are an expert at creating clear, informative Mermaid diagrams for a DIAGRAM-FIRST WIKI.
 
 🎯 CRITICAL: This diagram is the PRIMARY CONTENT for this section, not a supplement.
 The wiki is composed of interactive diagrams with explanations - the diagrams ARE the documentation.
@@ -946,11 +976,18 @@ IMPORTANT DIAGRAM QUALITY (CRITICAL FOR DIAGRAM-FIRST WIKI):
 - Think: "Can someone understand this topic fully just from this diagram and explanations?"
 - Think: "In addition to structure design, what node styles, edge styles, and layout choices add clarity?"
 
+⚠️ CRITICAL LANGUAGE REQUIREMENT:
+- ALL text fields must be in {language_name} language
+- diagram_description → in {language_name}
+- node_explanations → in {language_name}
+- edge_explanations → in {language_name}
+- Node labels in Mermaid code → in {language_name} (but keep node IDs in English)
+
 Return your response in the following JSON format:
 
 {{
   "mermaid_code": "{required_syntax}\\n  Client[Client Request]\\n  API[API Layer]\\n  ...",
-  "diagram_description": "Brief 2-3 sentence explanation of what this diagram shows",
+  "diagram_description": "Brief 2-3 sentence explanation in {language_name}",
   "node_explanations": {{
     "Client": "Explanation of what this node represents and its role",
     "API": "Explanation of the API layer's responsibilities"
@@ -968,7 +1005,13 @@ CRITICAL FORMATTING:
 - Use the node IDs exactly as they appear in mermaid_code for explanations
 - For edge explanations, use the format: "SourceNode->TargetNode" or "SourceNode-->TargetNode"
 
-Generate the diagram in {language_name} language.
+🌐 FINAL LANGUAGE CHECK BEFORE SUBMITTING:
+✓ Is diagram_description in {language_name}? ({language})
+✓ Are all node_explanations in {language_name}? ({language})
+✓ Are all edge_explanations in {language_name}? ({language})
+✓ Are Mermaid node labels in {language_name}? ({language})
+
+If ANY field is in the wrong language, FIX IT NOW before returning!
 
 Create the diagram now:"""
     
@@ -1093,7 +1136,10 @@ def build_diagram_correction_prompt(
         "**Syntax errors in arrows** → Use --> or ->> correctly",
         "**Unclosed subgraphs** → Ensure every subgraph has \"end\"",
         "**Invalid style syntax** → Check color codes and property names",
-        "**Duplicate node IDs** → Make all IDs unique"
+        "**Duplicate node IDs** → Make all IDs unique",
+        """In Mermaid, the syntax -->|Label| already creates the arrow. 
+        You do not need to add another --> after the label
+        For example A -->|Yes| --> B is WRONG and you should use A -->|Yes| B"""
     ]
     
     common_errors_sequence = [
@@ -1694,7 +1740,10 @@ def build_wiki_modification_prompt(
     # Extract first line to preserve diagram type
     first_line = existing_mermaid.split('\n')[0].strip() if existing_mermaid else f"{existing_type} TD"
     
-    prompt = f"""You are modifying an existing wiki section for a codebase documentation system.
+    prompt = f"""⚠️ LANGUAGE REQUIREMENT: Generate ALL content in {language_name} language ({language}).
+This includes: section descriptions, mermaid node labels, diagram descriptions, node explanations, edge explanations.
+
+You are modifying an existing wiki section for a codebase documentation system.
 
 SECTION NAME: {wiki_name}
 
@@ -1741,7 +1790,15 @@ CRITICAL RULES:
 5. Keep valid Mermaid syntax (proper node IDs, edge formats)
 6. Use same node naming style as existing diagram
 
-IMPORTANT: Generate the content in {language_name} language.
+🌐 CRITICAL LANGUAGE REQUIREMENT:
+⚠️ ALL content MUST be in {language_name} language ({language}):
+- section_description → {language_name}
+- diagram_description → {language_name}  
+- node_explanations values → {language_name}
+- edge_explanations values → {language_name}
+- Mermaid node labels → {language_name}
+
+✓ FINAL CHECK: Is EVERYTHING in {language_name}? If not, FIX IT NOW!
 
 Respond with valid JSON only:"""
     
