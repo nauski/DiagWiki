@@ -269,7 +269,7 @@ cp .env.example .env
 # Backend
 cd backend
 conda env create -f environment.yml
-conda activate diagwiki
+conda activate DiagWiki
 
 # Frontend
 cd ../frontend
@@ -288,7 +288,7 @@ Or run manually:
 ```bash
 # Terminal 1 - Backend
 cd backend
-conda activate diagwiki
+conda activate DiagWiki
 python main.py
 
 # Terminal 2 - Frontend
