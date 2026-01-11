@@ -287,6 +287,7 @@ Or run manually:
 
 ```bash
 # Terminal 1 - Backend
+ollama serve &
 cd backend
 conda activate DiagWiki
 python main.py
