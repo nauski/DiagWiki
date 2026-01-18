@@ -3,13 +3,15 @@ Wiki RAG query utilities.
 
 This module handles dual-RAG queries that combine wiki database (generated diagrams)
 with codebase database (source code) for comprehensive answers.
+
+Uses Claude Code CLI for LLM generation.
 """
 
 import os
 import logging
 from typing import Dict, List
 from adalflow.core.db import LocalDB
-from adalflow.core.types import ModelType, Document
+from adalflow.core.types import Document
 from const.config import Config
 from const.prompts import build_wiki_question_prompt
 
@@ -154,33 +156,22 @@ class WikiRAGQuery:
             return [], "Codebase context unavailable."
     
     def _generate_answer(self, query: str, wiki_context: str, codebase_context: str) -> str:
-        """Generate answer using both wiki and codebase contexts."""
+        """Generate answer using both wiki and codebase contexts with Claude Code CLI."""
         prompt = build_wiki_question_prompt(
             question=query,
             wiki_context=wiki_context,
             codebase_context=codebase_context
         )
-        
-        # Use get_llm_client() for proper timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "options": {"temperature": Config.DEFAULT_TEMPERATURE},
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            return response.message.content
+
+        # Use Claude Code CLI
+        client = Config.get_llm_client()
+        response = client.generate(prompt)
+
+        if response.success:
+            return response.content
         else:
-            return str(response)
+            logger.error(f"Failed to generate answer: {response.error}")
+            return f"Error generating answer: {response.error}"
     
     def _format_sources(self, wiki_docs: List[Document], codebase_docs: List[Document], top_k: int) -> Dict:
         """Format sources from both wiki and codebase."""

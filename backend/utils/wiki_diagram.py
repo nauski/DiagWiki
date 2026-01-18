@@ -4,13 +4,14 @@ Wiki diagram generation utilities.
 This module handles the two-step diagram generation process:
 1. Identify diagram sections (what to visualize)
 2. Generate diagrams with explanations (create visualizations)
+
+Uses Claude Code CLI for LLM generation.
 """
 
 import os
 import json
 import logging
 from typing import Dict, List
-from adalflow.core.types import ModelType
 from const.config import Config
 from const.prompts import (
     build_page_analysis_queries,
@@ -298,64 +299,52 @@ class WikiDiagramGenerator:
         return True
     
     def _call_llm_for_sections(self, prompt: str, iteration_name: str, return_full: bool = False) -> any:
-        """Helper method to call LLM for section identification iterations."""
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "format": "json",
-            "options": {
-                "temperature": Config.DEFAULT_TEMPERATURE,
-                "num_ctx": Config.LARGE_CONTEXT_WINDOW
-            },
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract content
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            sections_json = response.message.content
+        """Helper method to call LLM for section identification iterations using Claude Code CLI."""
+        client = Config.get_llm_client()
+
+        # Call Claude Code CLI with JSON output
+        sections_data = client.generate_json(prompt)
+
+        if not sections_data:
+            # Fallback: try to get raw response and parse
+            response = client.generate(prompt, json_output=True)
+            if not response.success:
+                logger.error(f"{iteration_name}: LLM call failed: {response.error}")
+                return None if return_full else []
+
+            # Try to parse the raw response
+            try:
+                sections_data = json.loads(response.content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse {iteration_name} JSON: {e}")
+                logger.error(f"Raw response: {response.content[:500]}...")
+                return None if return_full else []
+
+        # Validate sections if present
+        if 'sections' in sections_data:
+            valid_sections = []
+            invalid_count = 0
+
+            for section in sections_data['sections']:
+                if self._validate_section(section, iteration_name):
+                    valid_sections.append(section)
+                else:
+                    invalid_count += 1
+
+            if invalid_count > 0:
+                logger.warning(f"{iteration_name}: Filtered out {invalid_count} invalid sections, kept {len(valid_sections)} valid ones")
+
+            # If ALL sections are invalid, return error
+            if len(valid_sections) == 0 and len(sections_data['sections']) > 0:
+                logger.error(f"{iteration_name}: All {len(sections_data['sections'])} sections were invalid!")
+                return None if return_full else []
+
+            sections_data['sections'] = valid_sections
+
+        if return_full:
+            return sections_data
         else:
-            sections_json = str(response)
-        
-        try:
-            sections_data = json.loads(sections_json)
-            
-            # Validate sections if present
-            if 'sections' in sections_data:
-                valid_sections = []
-                invalid_count = 0
-                
-                for section in sections_data['sections']:
-                    if self._validate_section(section, iteration_name):
-                        valid_sections.append(section)
-                    else:
-                        invalid_count += 1
-                
-                if invalid_count > 0:
-                    logger.warning(f"⚠️  {iteration_name}: Filtered out {invalid_count} invalid sections, kept {len(valid_sections)} valid ones")
-                
-                # If ALL sections are invalid, return error
-                if len(valid_sections) == 0 and len(sections_data['sections']) > 0:
-                    logger.error(f"❌ {iteration_name}: All {len(sections_data['sections'])} sections were invalid!")
-                    return None if return_full else []
-                
-                sections_data['sections'] = valid_sections
-            
-            if return_full:
-                return sections_data
-            else:
-                return sections_data.get('sections', [])
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse {iteration_name} JSON: {e}")
-            logger.error(f"Raw response: {sections_json[:500]}...")
-            return None if return_full else []
+            return sections_data.get('sections', [])
     
     def generate_section_diagram(
         self,
@@ -572,7 +561,7 @@ class WikiDiagramGenerator:
         return result
     
     def _generate_concise_title(self, prompt: str, description: str) -> str:
-        """Generate a concise title from a user prompt for custom diagrams."""
+        """Generate a concise title from a user prompt for custom diagrams using Claude Code CLI."""
         title_prompt = f"""Given this user request for a diagram:
 
 "{prompt}"
@@ -587,34 +576,19 @@ Requirements:
 
 Return ONLY the title text, nothing else."""
 
-        # Use get_llm_client() for proper timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "options": {
-                "temperature": Config.FOCUSED_TEMPERATURE,
-                "num_ctx": Config.LARGE_CONTEXT_WINDOW
-            },
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE  # Keep model loaded
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=title_prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract title from response
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            title = response.message.content.strip()
+        # Use Claude Code CLI
+        client = Config.get_llm_client()
+        response = client.generate(title_prompt)
+
+        if response.success:
+            title = response.content.strip()
         else:
-            title = str(response).strip()
-        
+            logger.warning(f"Failed to generate title: {response.error}")
+            title = ""
+
         # Clean up the title (remove quotes, extra whitespace)
         title = title.strip('"\'').strip()
-        
+
         # Fallback if title is too long or empty
         if not title or len(title) > 100:
             # Extract first few words from prompt
@@ -622,7 +596,7 @@ Return ONLY the title text, nothing else."""
             title = ' '.join(words)
             if len(prompt.split()) > 8:
                 title += '...'
-        
+
         return title
     
     def _perform_section_rag_queries(
@@ -863,46 +837,30 @@ Return ONLY the title text, nothing else."""
         return rag_context, retrieved_sources, all_docs
     
     def _generate_diagram_with_llm(self, diagram_prompt: str) -> str:
-        """Generate diagram using LLM with size validation."""
+        """Generate diagram using Claude Code CLI with size validation."""
         # Validate prompt size BEFORE calling LLM
         prompt_chars = len(diagram_prompt)
         estimated_tokens = prompt_chars // 4
-        context_window = 16384
+        context_window = Config.LARGE_CONTEXT_WINDOW
         usage_percentage = (estimated_tokens / context_window) * 100
-        
+
         logger.info(f"Prompt size: {prompt_chars:,} chars (~{estimated_tokens:,} tokens, {usage_percentage:.1f}% of context)")
-        
+
         if usage_percentage > 90:
-            logger.warning(f"⚠️  Prompt exceeds 90% of context window! This may cause hanging.")
-            logger.warning(f"⚠️  Consider reducing MAX_RAG_CONTEXT_CHARS if this takes >60 seconds.")
+            logger.warning("Prompt exceeds 90% of context window! This may cause issues.")
+            logger.warning("Consider reducing MAX_RAG_CONTEXT_CHARS if this takes too long.")
         elif usage_percentage > 75:
-            logger.warning(f"⚠️  Prompt exceeds 75% of context window. Processing may be slow.")
-        
-        # Use get_llm_client() for proper timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "format": "json",
-            "options": {
-                "temperature": Config.DEFAULT_TEMPERATURE,
-                "num_ctx": Config.LARGE_CONTEXT_WINDOW
-            },
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE  # Keep model loaded
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=diagram_prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        diagram_response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract diagram content
-        if hasattr(diagram_response, 'message') and hasattr(diagram_response.message, 'content'):
-            return diagram_response.message.content
+            logger.warning("Prompt exceeds 75% of context window. Processing may be slow.")
+
+        # Use Claude Code CLI
+        client = Config.get_llm_client()
+        response = client.generate(diagram_prompt, json_output=True)
+
+        if response.success:
+            return response.content
         else:
-            return str(diagram_response)
+            logger.error(f"Diagram generation failed: {response.error}")
+            return json.dumps({"error": response.error})
     
     def _process_diagram_response(
         self,

@@ -5,6 +5,8 @@ This module orchestrates wiki generation using specialized modules:
 - WikiCache: File system caching
 - WikiRAGQuery: Dual-RAG queries
 - WikiDiagramGenerator: Diagram generation
+
+Uses Claude Code CLI for LLM generation.
 """
 
 import os
@@ -30,8 +32,6 @@ from const.prompts import (
     build_wiki_modification_prompt,
     build_wiki_problem_analysis_prompt
 )
-
-from adalflow.core.types import ModelType
 
 logger = logging.getLogger(__name__)
 
@@ -305,37 +305,20 @@ class WikiGenerator:
             comprehensive=comprehensive
         )
         
-        # Call LLM with timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "options": {
-                "temperature": Config.DEFAULT_TEMPERATURE,
-                "num_ctx": Config.LARGE_CONTEXT_WINDOW
-            },
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        logger.info("Calling LLM to generate wiki structure...")
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract content from Ollama ChatResponse
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            wiki_structure = response.message.content
-        elif hasattr(response, 'data'):
-            wiki_structure = response.data
-        elif isinstance(response, dict):
-            wiki_structure = response.get('message', {}).get('content', '')
+        # Call Claude Code CLI
+        logger.info("Calling Claude Code CLI to generate wiki structure...")
+        client = Config.get_llm_client()
+        response = client.generate(prompt)
+
+        if response.success:
+            wiki_structure = response.content
         else:
-            logger.warning(f"Unexpected response type: {type(response)}")
-            wiki_structure = str(response)
-        
+            logger.error(f"Failed to generate wiki structure: {response.error}")
+            return {
+                "status": "error",
+                "error": f"LLM call failed: {response.error}"
+            }
+
         logger.info(f"Wiki structure generated ({len(wiki_structure)} chars)")
         
         # Cache the structure
@@ -467,36 +450,20 @@ class WikiGenerator:
             language=language
         )
         
-        # Call LLM with timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "options": {
-                "temperature": Config.DEFAULT_TEMPERATURE,
-                "num_ctx": Config.LARGE_CONTEXT_WINDOW
-            },
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        logger.info(f"Calling LLM to generate wiki page for: {page_title}")
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract content from Ollama ChatResponse
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            page_content = response.message.content
-        elif hasattr(response, 'data'):
-            page_content = response.data
-        elif isinstance(response, dict):
-            page_content = response.get('message', {}).get('content', '')
+        # Call Claude Code CLI
+        logger.info(f"Calling Claude Code CLI to generate wiki page for: {page_title}")
+        client = Config.get_llm_client()
+        response = client.generate(prompt)
+
+        if response.success:
+            page_content = response.content
         else:
-            logger.warning(f"Unexpected response type: {type(response)}")
-            page_content = str(response)
+            logger.error(f"Failed to generate wiki page: {response.error}")
+            return {
+                "status": "error",
+                "page_title": page_title,
+                "error": f"LLM call failed: {response.error}"
+            }
         
         logger.info(f"Wiki page generated ({len(page_content)} chars)")
         
@@ -608,23 +575,23 @@ class WikiGenerator:
         language: str = "en"
     ):
         """
-        Stream the wiki problem analysis in real-time.
-        
+        Analyze wiki problem and yield the result.
+
+        Note: Claude Code CLI doesn't support streaming, so this returns
+        the full response at once. The async interface is maintained for compatibility.
+
         Args:
             user_prompt: User's request
-            wiki_items: Optional dict of {wiki_name: question} pairs (auto-loaded if None)
-            websocket: WebSocket connection for streaming
             language: Target language code for response
-        
+
         Yields:
-            Text chunks from LLM response
+            The full response text (in one chunk)
         """
         from adalflow.core.db import LocalDB
-        import ollama
-        
+
         # Ensure RAG is initialized
         self.initialize_rag()
-        
+
         # Auto-load wiki_items from sections.json if not provided
         wiki_items = self.load_wiki_sections()
         if wiki_items:
@@ -632,16 +599,16 @@ class WikiGenerator:
         else:
             logger.warning("No wiki sections found for context")
             wiki_items = {}
-        
+
         # Retrieve contexts (same as non-streaming)
         wiki_context = ""
         wiki_db_path = self.cache.wiki_db_path
-        
+
         if os.path.exists(wiki_db_path):
             try:
                 wiki_db = LocalDB.load_state(filepath=wiki_db_path)
                 wiki_docs = wiki_db.get_transformed_data(key="wiki_content")
-                
+
                 if wiki_docs:
                     wiki_context = "\n\n".join([
                         f"[{doc.meta_data.get('content_id', 'unknown')}]\n{doc.text[:500]}"
@@ -649,10 +616,10 @@ class WikiGenerator:
                     ])
             except Exception as e:
                 logger.warning(f"Could not load wiki context: {e}")
-        
+
         if not wiki_context:
             wiki_context = "No existing wiki content found."
-        
+
         # Query codebase
         try:
             rag_answer, codebase_docs = self.rag.call(
@@ -660,7 +627,7 @@ class WikiGenerator:
                 top_k=Config.RAG_TOP_K,
                 use_reranking=True
             )
-            
+
             codebase_context = "\n\n".join([
                 f"[{doc.meta_data.get('file_path', 'unknown')}]\n{doc.text[:500]}"
                 for doc in codebase_docs[:20]
@@ -668,7 +635,7 @@ class WikiGenerator:
         except Exception as e:
             logger.warning(f"Could not query codebase: {e}")
             codebase_context = "Codebase context unavailable."
-        
+
         # Build prompt
         prompt = build_wiki_problem_analysis_prompt(
             user_prompt=user_prompt,
@@ -677,27 +644,16 @@ class WikiGenerator:
             wiki_items=wiki_items,
             language=language
         )
-        
-        # Stream from Ollama
-        client = ollama.Client(host=Config.OLLAMA_HOST, timeout=Config.LLM_TIMEOUT)
-        
-        stream_response = client.chat(
-            model=Config.GENERATION_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            stream=True,
-            format="json",
-            options={
-                "temperature": Config.DEFAULT_TEMPERATURE,
-                "num_ctx": Config.LARGE_CONTEXT_WINDOW
-            }
-        )
-        
-        # Stream chunks
-        for chunk in stream_response:
-            if 'message' in chunk and 'content' in chunk['message']:
-                content = chunk['message']['content']
-                if content:
-                    yield content
+
+        # Call Claude Code CLI (non-streaming)
+        client = Config.get_llm_client()
+        response = client.generate(prompt, json_output=True)
+
+        if response.success:
+            yield response.content
+        else:
+            logger.error(f"Wiki problem analysis failed: {response.error}")
+            yield json.dumps({"error": response.error})
     
     def analyze_wiki_problem(
         self,
@@ -772,31 +728,31 @@ class WikiGenerator:
             language=language
         )
         
-        # Call LLM with timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "format": "json",
-            "options": {"temperature": Config.DEFAULT_TEMPERATURE, "num_ctx": Config.LARGE_CONTEXT_WINDOW},
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract response
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            response_text = response.message.content
-        else:
-            response_text = str(response)
-        
+        # Call Claude Code CLI
+        client = Config.get_llm_client()
+        response = client.generate_json(prompt)
+
+        if not response:
+            # Try raw response
+            raw_response = client.generate(prompt, json_output=True)
+            if not raw_response.success:
+                return {
+                    "status": "error",
+                    "error": f"LLM call failed: {raw_response.error}"
+                }
+            try:
+                response = json.loads(raw_response.content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse LLM response: {e}")
+                return {
+                    "status": "error",
+                    "error": "Failed to parse analysis",
+                    "raw_response": raw_response.content[:500]
+                }
+        result = response
+
         try:
-            result = json.loads(response_text)
+            pass  # result is already parsed
             
             # Validate response format
             intent = result.get('intent')
@@ -961,31 +917,30 @@ class WikiGenerator:
             language=language
         )
         
-        # Call LLM with timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "format": "json",
-            "options": {"temperature": Config.DEFAULT_TEMPERATURE, "num_ctx": Config.LARGE_CONTEXT_WINDOW},
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=creation_prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract response
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            response_text = response.message.content
-        else:
-            response_text = str(response)
-        
+        # Call Claude Code CLI
+        client = Config.get_llm_client()
+        diagram_data = client.generate_json(creation_prompt)
+
+        if not diagram_data:
+            # Try raw response
+            raw_response = client.generate(creation_prompt, json_output=True)
+            if not raw_response.success:
+                return {
+                    "status": "error",
+                    "error": f"LLM call failed: {raw_response.error}"
+                }
+            try:
+                diagram_data = json.loads(raw_response.content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse diagram JSON: {e}")
+                return {
+                    "status": "error",
+                    "error": f"JSON parse error: {str(e)}",
+                    "raw_response": raw_response.content[:500]
+                }
+
         try:
-            diagram_data = json.loads(response_text)
+            pass  # diagram_data is already parsed
             
             # Validate and parse mermaid code
             mermaid_code = diagram_data.get('mermaid_code', '')
@@ -1160,31 +1115,30 @@ class WikiGenerator:
             language=language
         )
         
-        # Call LLM with timeout configuration
-        model = Config.get_llm_client()
-        model_kwargs = {
-            "model": Config.GENERATION_MODEL,
-            "format": "json",
-            "options": {"temperature": Config.DEFAULT_TEMPERATURE, "num_ctx": Config.LARGE_CONTEXT_WINDOW},
-            "keep_alive": Config.OLLAMA_KEEP_ALIVE
-        }
-        
-        api_kwargs = model.convert_inputs_to_api_kwargs(
-            input=mod_prompt,
-            model_kwargs=model_kwargs,
-            model_type=ModelType.LLM
-        )
-        
-        response = model.call(api_kwargs=api_kwargs, model_type=ModelType.LLM)
-        
-        # Extract response
-        if hasattr(response, 'message') and hasattr(response.message, 'content'):
-            response_text = response.message.content
-        else:
-            response_text = str(response)
-        
+        # Call Claude Code CLI
+        client = Config.get_llm_client()
+        diagram_data = client.generate_json(mod_prompt)
+
+        if not diagram_data:
+            # Try raw response
+            raw_response = client.generate(mod_prompt, json_output=True)
+            if not raw_response.success:
+                return {
+                    "status": "error",
+                    "error": f"LLM call failed: {raw_response.error}"
+                }
+            try:
+                diagram_data = json.loads(raw_response.content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse diagram JSON: {e}")
+                return {
+                    "status": "error",
+                    "error": f"JSON parse error: {str(e)}",
+                    "raw_response": raw_response.content[:500]
+                }
+
         try:
-            diagram_data = json.loads(response_text)
+            pass  # diagram_data is already parsed
             
             # Validate and parse mermaid code
             mermaid_code = diagram_data.get('mermaid_code', '')

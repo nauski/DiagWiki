@@ -1,6 +1,5 @@
 import os
 import logging
-import weakref
 from dataclasses import dataclass, field
 from typing import List, Tuple
 import adalflow as adal
@@ -17,27 +16,25 @@ You have access to relevant code snippets from the repository.
 Provide clear, accurate, and helpful answers based on the retrieved context.
 If you're not sure about something, acknowledge it rather than making assumptions."""
 
-# RAG Template
-RAG_TEMPLATE = r"""<SYS>{{system_prompt}}</SYS>
-User: {{input_str}}
+# RAG Template for Claude
+RAG_TEMPLATE = """<system>
+{system_prompt}
+</system>
 
-{% if contexts %}
-<CONTEXT>
+User question: {input_str}
+
+<context>
 The following code snippets and documentation from the repository may be relevant to your question:
 
-{% for doc in contexts %}
----
-File: {{ doc.meta_data.file_path if doc.meta_data and doc.meta_data.file_path else 'Unknown' }}
-{{ doc.text }}
----
-{% endfor %}
-</CONTEXT>
-{% endif %}
+{contexts}
+</context>
 
 Please provide a helpful answer based on the context above.
-{{output_format_str}}
+Format your response as JSON with these fields:
+- "rationale": Your chain of thought reasoning
+- "answer": Your final answer in markdown format (DO NOT wrap in triple backticks)
 
-Answer:"""
+{output_format_str}"""
 
 
 @dataclass
@@ -57,8 +54,8 @@ class RAGAnswer(adal.DataClass):
 
 class RAG(adal.Component):
     """RAG component for code repository question answering.
-    
-    Uses LocalDB for document storage and FAISS for retrieval.
+
+    Uses LocalDB for document storage, FAISS for retrieval, and Claude Code CLI for generation.
     """
 
     def __init__(self, model: str = None):
@@ -66,71 +63,41 @@ class RAG(adal.Component):
         Initialize the RAG component.
 
         Args:
-            model: Model name to use (defaults to Config.GENERATION_MODEL)
+            model: Model name (ignored - uses Claude Code CLI)
         """
         super().__init__()
 
-        self.model = model or Config.GENERATION_MODEL
-        
-        # Check if Ollama model exists
-        from utils.dataPipeline import check_ollama_model_exists
-        if not check_ollama_model_exists(self.model):
-            raise Exception(
-                f"Ollama model '{self.model}' not found. "
-                f"Please run 'ollama pull {self.model}' to install it."
-            )
+        self.model = Config.GENERATION_MODEL
 
-        # Initialize embedder for queries (single string only for Ollama)
-        self.embedder = adal.Embedder(
-            model_client=Config.get_embedding_config()["client"],
-            model_kwargs=Config.get_embedding_config()["model_kwargs"]
-        )
-        
-        # Create a single-string embedder wrapper for Ollama compatibility
-        self_weakref = weakref.ref(self)
-        
-        def single_string_embedder(query):
-            """Embedder that only accepts single strings (Ollama requirement)"""
+        # Initialize local embedder for queries
+        self.embedder = Config.get_embedder()
+        self.embedding_dimension = self.embedder.get_dimension()
+
+        logger.info(f"RAG initialized with embedding dimension: {self.embedding_dimension}")
+
+        # Create embedder wrapper for FAISS retriever
+        def query_embedder(query):
+            """Embedder function for FAISS retriever."""
             if isinstance(query, list):
                 if len(query) != 1:
-                    raise ValueError("Ollama embedder only supports a single string")
+                    # Return batch embeddings for multiple queries
+                    embeddings = self.embedder.embed_batch(query)
+                    # Return in format expected by FAISS
+                    return type('EmbedderResult', (), {'data': [
+                        type('EmbedData', (), {'embedding': emb})() for emb in embeddings
+                    ]})()
                 query = query[0]
-            instance = self_weakref()
-            assert instance is not None, "RAG instance is no longer available"
-            return instance.embedder(input=query)
-        
-        self.query_embedder = single_string_embedder
 
-        # Set up output parser
-        data_parser = adal.DataClassParser(
-            data_class=RAGAnswer,
-            return_data_class=True
-        )
+            embedding = self.embedder.embed(query)
+            # Return in format expected by FAISS retriever
+            return type('EmbedderResult', (), {'data': [
+                type('EmbedData', (), {'embedding': embedding})()
+            ]})()
 
-        format_instructions = data_parser.get_output_format_str() + """
+        self.query_embedder = query_embedder
 
-FORMATTING RULES:
-1. Provide only the final answer, not your thinking process
-2. Format answer in markdown for beautiful rendering
-3. DO NOT wrap response in ``` code fences
-4. Write content directly without escape characters
-5. Use plain text for tags and lists"""
-
-        # Set up the generator
-        self.generator = adal.Generator(
-            template=RAG_TEMPLATE,
-            prompt_kwargs={
-                "output_format_str": format_instructions,
-                "system_prompt": RAG_SYSTEM_PROMPT,
-                "contexts": None,
-            },
-            model_client=Config.get_embedding_config()["client"],
-            model_kwargs={
-                "model": self.model,
-                "keep_alive": Config.OLLAMA_KEEP_ALIVE  # Keep model loaded
-            },
-            output_processors=data_parser,
-        )
+        # Initialize Claude Code client for generation
+        self.llm_client = Config.get_llm_client()
 
         # Initialize storage
         self.transformed_docs = []
@@ -147,22 +114,22 @@ FORMATTING RULES:
         # Handle both file and directory paths
         if os.path.isdir(db_path):
             db_path = os.path.join(db_path, "db.pkl")
-        
+
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"Database not found at: {db_path}")
 
         logger.info(f"Loading database from: {db_path}")
         db = LocalDB.load_state(filepath=db_path)
-        
+
         # Get transformed data with embeddings
         self.transformed_docs = db.get_transformed_data(key="split_and_embed")
         self.db_path = db_path
-        
+
         logger.info(f"Loaded {len(self.transformed_docs)} documents")
 
         # Validate and filter embeddings
         self.transformed_docs = self._validate_and_filter_embeddings(self.transformed_docs)
-        
+
         if not self.transformed_docs:
             raise ValueError("No valid documents with embeddings found")
 
@@ -179,11 +146,11 @@ FORMATTING RULES:
             folder_path: Path to folder whose database to load
         """
         from utils.dataPipeline import generate_db_name
-        
+
         db_name = generate_db_name(folder_path)
         data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
         db_path = os.path.join(data_dir, db_name, "db.pkl")
-        
+
         self.load_database(db_path)
 
     def _validate_and_filter_embeddings(self, documents: List) -> List:
@@ -282,10 +249,17 @@ FORMATTING RULES:
             raise ValueError("No documents loaded. Call load_database() first.")
 
         try:
+            # Get embedding dimension from first document
+            first_doc = self.transformed_docs[0]
+            if isinstance(first_doc.vector, list):
+                embedding_dim = len(first_doc.vector)
+            else:
+                embedding_dim = first_doc.vector.shape[0]
+
             # FAISS retriever configuration
             retriever_config = {
                 "top_k": Config.RAG_TOP_K,
-                "dimensions": 768,  # nomic-embed-text dimension
+                "dimensions": embedding_dim,
                 "metric": "cosine"
             }
 
@@ -295,11 +269,11 @@ FORMATTING RULES:
                 documents=self.transformed_docs,
                 document_map_func=lambda doc: doc.vector,
             )
-            logger.info("FAISS retriever created successfully")
-            
+            logger.info(f"FAISS retriever created with dimension {embedding_dim}")
+
         except Exception as e:
             logger.error(f"Error creating FAISS retriever: {e}")
-            
+
             # Provide debugging info for embedding size errors
             if "All embeddings should be of the same size" in str(e):
                 logger.error("Embedding size mismatch detected")
@@ -317,110 +291,110 @@ FORMATTING RULES:
     def _compute_bm25_scores(self, query: str, doc_indices: List[int]) -> List[float]:
         """
         Compute BM25 scores for documents.
-        
+
         BM25 is a ranking function that scores documents based on term frequency,
         inverse document frequency, and document length normalization.
-        
+
         Args:
             query: User query
             doc_indices: Indices of documents to score
-            
+
         Returns:
             List of BM25 scores for each document
         """
         import re
         import math
-        
+
         # BM25 parameters
         k1 = 1.5  # Term frequency saturation parameter
         b = 0.75  # Length normalization parameter
-        
+
         # Tokenize query (simple whitespace + lowercase)
-        stop_words = {'what', 'is', 'the', 'how', 'does', 'can', 'you', 'explain', 'show', 
-                     'me', 'a', 'an', 'of', 'to', 'in', 'for', 'on', 'with', 'from', 'at',
-                     'by', 'about', 'as', 'are', 'was', 'were', 'be', 'been', 'being'}
-        query_terms = [w.lower() for w in re.findall(r'\w+', query) 
-                      if w.lower() not in stop_words and len(w) > 2]
-        
+        stop_words = {'what', 'is', 'the', 'how', 'does', 'can', 'you', 'explain', 'show',
+                      'me', 'a', 'an', 'of', 'to', 'in', 'for', 'on', 'with', 'from', 'at',
+                      'by', 'about', 'as', 'are', 'was', 'were', 'be', 'been', 'being'}
+        query_terms = [w.lower() for w in re.findall(r'\w+', query)
+                       if w.lower() not in stop_words and len(w) > 2]
+
         if not query_terms:
             return [0.0] * len(doc_indices)
-        
+
         # Get documents and compute stats
         docs = [self.transformed_docs[idx] for idx in doc_indices]
         doc_texts = [doc.text.lower() for doc in docs]
-        
+
         # Compute document lengths
         doc_lengths = [len(re.findall(r'\w+', text)) for text in doc_texts]
         avg_doc_length = sum(doc_lengths) / len(doc_lengths) if doc_lengths else 1.0
-        
+
         # Compute term document frequency (for IDF)
         term_doc_freq = {}
         for term in query_terms:
             term_doc_freq[term] = sum(1 for text in doc_texts if term in text)
-        
+
         # Compute BM25 scores
         scores = []
         num_docs = len(docs)
-        
+
         for i, (doc_text, doc_len) in enumerate(zip(doc_texts, doc_lengths)):
             score = 0.0
-            
+
             for term in query_terms:
                 # Term frequency in document
                 tf = doc_text.count(term)
-                
+
                 if tf == 0:
                     continue
-                
+
                 # Inverse document frequency
                 df = term_doc_freq[term]
                 idf = math.log((num_docs - df + 0.5) / (df + 0.5) + 1.0)
-                
+
                 # BM25 formula
                 numerator = tf * (k1 + 1)
                 denominator = tf + k1 * (1 - b + b * (doc_len / avg_doc_length))
                 score += idf * (numerator / denominator)
-            
+
             # Boost if query terms appear in file path
             file_path = docs[i].meta_data.get('file_path', '').lower() if hasattr(docs[i], 'meta_data') else ''
             for term in query_terms:
                 if term in file_path:
                     score += 0.5  # Path match bonus
-            
+
             scores.append(score)
-        
+
         return scores
-    
+
     def _rerank_with_keywords(self, query: str, doc_indices: List[int], initial_top_k: int) -> List[int]:
         """
         Re-rank documents using BM25 keyword scoring combined with semantic similarity.
-        
+
         Uses Reciprocal Rank Fusion (RRF) to combine:
         1. Semantic similarity scores (from FAISS)
         2. BM25 keyword relevance scores
-        
+
         Args:
             query: User query
             doc_indices: Indices of documents (already ranked by semantic similarity)
             initial_top_k: Number of documents retrieved
-            
+
         Returns:
             Re-ranked list of document indices
         """
         # Compute BM25 scores
         bm25_scores = self._compute_bm25_scores(query, doc_indices)
-        
+
         # Reciprocal Rank Fusion (RRF)
         # Combines semantic rank (position in doc_indices) with BM25 scores
         k = 60  # RRF constant (standard value)
-        
+
         # Semantic ranking (position-based)
         semantic_ranks = {idx: rank for rank, idx in enumerate(doc_indices)}
-        
+
         # BM25 ranking
         bm25_ranked = sorted(enumerate(doc_indices), key=lambda x: bm25_scores[x[0]], reverse=True)
         bm25_ranks = {idx: rank for rank, (_, idx) in enumerate(bm25_ranked)}
-        
+
         # Combine scores using RRF
         combined_scores = []
         for idx in doc_indices:
@@ -428,19 +402,72 @@ FORMATTING RULES:
             bm25_rrf = 1.0 / (k + bm25_ranks[idx])
             combined_score = semantic_rrf + bm25_rrf
             combined_scores.append((idx, combined_score))
-        
+
         # Sort by combined score
         combined_scores.sort(key=lambda x: x[1], reverse=True)
-        
+
         # Log re-ranking changes
         if doc_indices[:3] != [idx for idx, _ in combined_scores[:3]]:
             logger.info("Re-ranking changed top 3 results")
-            top_files = [self.transformed_docs[idx].meta_data.get('file_path', 'unknown') 
-                        for idx, _ in combined_scores[:3] 
-                        if hasattr(self.transformed_docs[idx], 'meta_data')]
+            top_files = [self.transformed_docs[idx].meta_data.get('file_path', 'unknown')
+                         for idx, _ in combined_scores[:3]
+                         if hasattr(self.transformed_docs[idx], 'meta_data')]
             logger.info(f"Top 3 after re-ranking: {top_files}")
-        
+
         return [idx for idx, _ in combined_scores]
+
+    def _generate_answer(self, query: str, contexts: List[Document]) -> RAGAnswer:
+        """
+        Generate answer using Claude Code CLI.
+
+        Args:
+            query: User question
+            contexts: Retrieved context documents
+
+        Returns:
+            RAGAnswer with rationale and answer
+        """
+        # Format contexts
+        context_str = ""
+        for i, doc in enumerate(contexts):
+            file_path = doc.meta_data.get('file_path', 'Unknown') if hasattr(doc, 'meta_data') else 'Unknown'
+            context_str += f"\n---\nFile: {file_path}\n{doc.text}\n---\n"
+
+        # Build prompt
+        prompt = RAG_TEMPLATE.format(
+            system_prompt=RAG_SYSTEM_PROMPT,
+            input_str=query,
+            contexts=context_str,
+            output_format_str="""
+FORMATTING RULES:
+1. Provide only the final answer, not your thinking process
+2. Format answer in markdown for beautiful rendering
+3. DO NOT wrap response in ``` code fences
+4. Write content directly without escape characters
+5. Use plain text for tags and lists"""
+        )
+
+        # Call Claude Code CLI
+        result = self.llm_client.generate_json(prompt)
+
+        if result:
+            return RAGAnswer(
+                rationale=result.get('rationale', ''),
+                answer=result.get('answer', str(result))
+            )
+        else:
+            # Fallback to non-JSON response
+            response = self.llm_client.generate(prompt)
+            if response.success:
+                return RAGAnswer(
+                    rationale="Direct response from Claude",
+                    answer=response.content
+                )
+            else:
+                return RAGAnswer(
+                    rationale="Error occurred",
+                    answer=f"Error generating response: {response.error}"
+                )
 
     def call(self, query: str, top_k: int = 20, use_reranking: bool = True) -> Tuple[RAGAnswer, List[Document]]:
         """
@@ -461,7 +488,7 @@ FORMATTING RULES:
             # Retrieve more documents initially for re-ranking
             initial_top_k = top_k * 3 if use_reranking else top_k
             retrieved_results = self.retriever(query, top_k=initial_top_k)
-            
+
             # Handle both list and RetrieverOutput formats
             if isinstance(retrieved_results, list):
                 # List of RetrieverOutput objects
@@ -473,45 +500,28 @@ FORMATTING RULES:
             else:
                 # Single RetrieverOutput object
                 doc_indices = retrieved_results.doc_indices
-            
+
             # Apply keyword-based re-ranking if enabled
             if use_reranking and doc_indices:
                 doc_indices = self._rerank_with_keywords(query, doc_indices, initial_top_k)
                 # Take top_k after re-ranking
                 doc_indices = doc_indices[:top_k]
-            
+
             # Get actual documents
             retrieved_docs = [
                 self.transformed_docs[doc_index]
                 for doc_index in doc_indices
             ]
 
-            # Generate answer
-            self.generator.prompt_kwargs["contexts"] = retrieved_docs
-            response = self.generator(prompt_kwargs={"input_str": query})
-
-            # Parse response
-            if isinstance(response, adal.GeneratorOutput):
-                answer = response.data if hasattr(response, 'data') else response
-            else:
-                answer = response
-            
-            # Validate answer is not None
-            if answer is None or not isinstance(answer, RAGAnswer):
-                logger.warning(f"Invalid answer format, using raw response")
-                # Try to extract answer from raw text
-                raw_text = str(response.raw_response if hasattr(response, 'raw_response') else response)
-                answer = RAGAnswer(
-                    rationale="Raw response from model (parsing failed)",
-                    answer=raw_text
-                )
+            # Generate answer using Claude Code CLI
+            answer = self._generate_answer(query, retrieved_docs)
 
             logger.info(f"Generated answer for query: {query[:50]}...")
             return answer, retrieved_docs
 
         except Exception as e:
             logger.error(f"Error in RAG call: {e}", exc_info=True)
-            
+
             # Create error response
             error_response = RAGAnswer(
                 rationale="Error occurred while processing the query.",

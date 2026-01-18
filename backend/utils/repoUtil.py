@@ -100,9 +100,7 @@ class RepoUtil:
     
     @staticmethod
     def token_count(text: str) -> int:
-        """Estimate token count for a given text
-        use ollama as default embedder
-        """
+        """Estimate token count for a given text using tiktoken."""
         encoding = tiktoken.get_encoding("cl100k_base")
         tokens = encoding.encode(text)
         return len(tokens)

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 from utils.repoUtil import RepoUtil
-from utils.dataPipeline import check_ollama_model_exists, get_all_ollama_models, DataPipeline, generate_db_name
+from utils.dataPipeline import DataPipeline, generate_db_name
 from utils.wiki_generator import WikiGenerator
 
 from const.config import Config, APP_NAME, APP_VERSION
@@ -141,17 +141,14 @@ async def get_file_content(
 
 @app.get("/available_models")
 async def list_available_models():
-    """Get list of all available Ollama models"""
-    models = get_all_ollama_models()
-    embedding_model = Config.get_embedding_config()['model_kwargs'].get('model', 'nomic-embed-text')
-    generation_model = Config.GENERATION_MODEL
-    
+    """Get current model configuration (using Claude Code CLI)"""
     return {
-        "available_models": models,
-        "current_embedding_model": embedding_model,
-        "current_generation_model": generation_model,
-        "embedding_model_available": check_ollama_model_exists(embedding_model),
-        "generation_model_available": check_ollama_model_exists(generation_model)
+        "generation_model": Config.GENERATION_MODEL,
+        "embedding_model": Config.EMBEDDING_MODEL,
+        "embedding_dimension": Config.EMBEDDING_DIMENSION,
+        "llm_backend": "claude-code-cli",
+        "embedding_backend": "sentence-transformers",
+        "note": "Generation uses Claude Code CLI (your subscription). Embeddings use local sentence-transformers."
     }
 
 @app.post("/initWiki")
@@ -239,7 +236,7 @@ async def init_wiki(
             "database_existed": db_exists,
             "rag_ready": True,
             "document_count": len(rag.transformed_docs),
-            "embedding_model": Config.get_embedding_config()['model_kwargs']['model'],
+            "embedding_model": Config.EMBEDDING_MODEL,
             "generation_model": Config.GENERATION_MODEL,
             "file_types": file_types
         }
@@ -344,7 +341,7 @@ async def query_wiki(
             "sources": sources,
             "retrieval_method": "hybrid (semantic + BM25)" if use_reranking else "semantic only",
             "model": {
-                "embedding": Config.get_embedding_config()['model_kwargs']['model'],
+                "embedding": Config.EMBEDDING_MODEL,
                 "generation": Config.GENERATION_MODEL
             }
         }
