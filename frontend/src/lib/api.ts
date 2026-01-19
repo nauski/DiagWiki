@@ -1,4 +1,7 @@
-const API_BASE = 'http://localhost:8001';
+// Use the same host as the frontend, but on port 8001
+export const API_BASE = typeof window !== 'undefined'
+	? `http://${window.location.hostname}:8001`
+	: 'http://localhost:8001';
 
 export async function initWiki(rootPath: string) {
 	const response = await fetch(`${API_BASE}/initWiki`, {

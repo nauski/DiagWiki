@@ -70,18 +70,17 @@ class ClaudeCodeClient:
             ClaudeResponse with content or error
         """
         try:
-            # Build the command
-            cmd = ["claude", "-p", prompt]
-
             # If JSON output is requested, add instruction to the prompt
             if json_output:
                 prompt = f"{prompt}\n\nIMPORTANT: Respond ONLY with valid JSON, no other text."
-                cmd = ["claude", "-p", prompt]
 
-            logger.debug(f"Calling Claude CLI with prompt length: {len(prompt)}")
+            logger.info(f"Calling Claude CLI with prompt length: {len(prompt)} chars")
 
+            # Use stdin to pass large prompts (avoids command-line length limits)
+            # The -p flag reads from argument, but we use --print with stdin for large prompts
             result = subprocess.run(
-                cmd,
+                ["claude", "-p", "-"],  # "-" tells claude to read prompt from stdin
+                input=prompt,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout

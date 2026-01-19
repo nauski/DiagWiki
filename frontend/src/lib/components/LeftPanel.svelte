@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { identifiedSections, currentProject, openDiagramTab, openTabs, generatedDiagrams, activeTabIndex, diagramCache, failedSections, corruptedDiagrams, selectedLanguage } from '$lib/stores';
-	import { generateSectionDiagram, fixCorruptedDiagram } from '$lib/api';
+	import { generateSectionDiagram, fixCorruptedDiagram, API_BASE } from '$lib/api';
 	import type { WikiSection } from '$lib/types';
 	import TreeNode from './TreeNode.svelte';
 	import QueryDialog from './QueryDialog.svelte';
@@ -318,7 +318,7 @@
 	async function fetchFolderTree(projectPath: string) {
 		loadingFolderTree = true;
 		try {
-			const response = await fetch('http://localhost:8001/getFolderTree', {
+			const response = await fetch(`${API_BASE}/getFolderTree`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',

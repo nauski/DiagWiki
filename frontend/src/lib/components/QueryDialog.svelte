@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { currentProject, identifiedSections, generatedDiagrams, diagramCache, selectedLanguage, updateProjectDiagramCount } from '$lib/stores';
-	import { generateSectionDiagram } from '$lib/api';
+	import { generateSectionDiagram, API_BASE } from '$lib/api';
 	import type { WikiSection } from '$lib/types';
 	import FileTreeNode from './FileTreeNode.svelte';
 	import { loadConstants, getConstants } from '$lib/constants';
@@ -41,7 +41,7 @@
 		if (!$currentProject || fileTree) return;
 		
 		try {
-			const response = await fetch('http://localhost:8001/getFolderTree', {
+			const response = await fetch(`${API_BASE}/getFolderTree`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ root_path: $currentProject })
@@ -65,7 +65,7 @@
 			selectedFiles = [...selectedFiles, filePath];
 			// Fetch file size
 			try {
-				const response = await fetch('http://localhost:8001/file_content', {
+				const response = await fetch(`${API_BASE}/file_content`, {
 					method: 'GET',
 					headers: { 'Content-Type': 'application/json' }
 				});
@@ -73,7 +73,7 @@
 					root: $currentProject || '',
 					path: filePath
 				});
-				const fileResponse = await fetch(`http://localhost:8001/file_content?${params}`);
+				const fileResponse = await fetch(`${API_BASE}/file_content?${params}`);
 				if (fileResponse.ok) {
 					const data = await fileResponse.json();
 					const size = data.content?.length || 0;
@@ -121,7 +121,7 @@
 						root: $currentProject || '',
 						path: filePath
 					});
-					const fileResponse = await fetch(`http://localhost:8001/file_content?${params}`);
+					const fileResponse = await fetch(`${API_BASE}/file_content?${params}`);
 					if (fileResponse.ok) {
 						const data = await fileResponse.json();
 						selectedFileSizes.set(filePath, data.content?.length || 0);
@@ -195,7 +195,7 @@
 			if (isNewCustomSection) {
 				// For custom diagrams, use the create wiki endpoint
 				const referenceFiles = referenceMode === 'manual' ? selectedFiles : undefined;
-				const response = await fetch('http://localhost:8001/modifyOrCreateWiki', {
+				const response = await fetch(`${API_BASE}/modifyOrCreateWiki`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({

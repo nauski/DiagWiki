@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { currentProject, identifiedSections, diagramCache, openTabs, generatedDiagrams, selectedLanguage, updateProjectDiagramCount } from '$lib/stores';
-	import { queryWikiProblemStream, generateSectionDiagram } from '$lib/api';
+	import { queryWikiProblemStream, generateSectionDiagram, API_BASE } from '$lib/api';
 
 	let query = '';
 	let isQuerying = false;
@@ -58,7 +58,7 @@
 			// Execute modifications first
 			for (const mod of modifications) {
 				try {
-					const response = await fetch('http://localhost:8001/modifyOrCreateWiki', {
+					const response = await fetch(`${API_BASE}/modifyOrCreateWiki`, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
@@ -131,7 +131,7 @@
 			// Execute creations
 			for (const creation of creations) {
 				try {
-					const response = await fetch('http://localhost:8001/modifyOrCreateWiki', {
+					const response = await fetch(`${API_BASE}/modifyOrCreateWiki`, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({

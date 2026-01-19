@@ -39,11 +39,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add CORS middleware
+# Add CORS middleware - allow all origins for network access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:4173"],  # Vite/SvelteKit dev servers
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins for development/local network
+    allow_credentials=False,  # Must be False when using allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
