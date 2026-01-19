@@ -1,10 +1,10 @@
 # DiagWiki
 
-## Explaining Code with Interactive Diagrams, no api calls, no privacy concerns!
+## Explaining Code with Interactive Diagrams
 
-DiagWiki analyzes your code and generates diagram-based wiki pages that explain how your system works. Instead of reading walls of text, you explore interactive diagrams where you can click on any component to understand its role. 
+DiagWiki analyzes your code and generates diagram-based wiki pages that explain how your system works. Instead of reading walls of text, you explore interactive diagrams where you can click on any component to understand its role.
 
-It is a local deployment tool that leverages large language models (LLMs) running on your machine via [Ollama](https://ollama.ai), ensuring your code never leaves your environment. **So, no expensive API calls or data privacy concerns!**
+It uses [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for intelligent diagram generation, leveraging your existing Claude Code subscription.
 
 ## Click the image below to watch the demo video:
 [![Demo Video](https://img.youtube.com/vi/NtdctuuEF_8/0.jpg)](https://youtu.be/NtdctuuEF_8)
@@ -246,73 +246,65 @@ classDiagram
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.10+
 - Node.js 20+
-- Ollama running locally
-  - Install from [ollama.ai](https://ollama.ai)
-  - Pull models: `ollama pull qwen3-coder:30b` and `ollama pull nomic-embed-text` (based on the what you put in `backend/.env` file)
-- Conda (recommended) or pip for Python packages
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+  - Install: `npm install -g @anthropic-ai/claude-code`
+  - Authenticate: `claude` (follow prompts)
 
 ### Setup
 
-1. **Create environment config**
+1. **Backend setup**
 
 ```bash
 cd backend
-cp .env.example .env
-# Edit .env if needed (defaults work for most setups)
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-2. **Install dependencies**
+2. **Frontend setup**
 
 ```bash
-# Backend
-cd backend
-conda env create -f environment.yml
-conda activate DiagWiki
-
-# Frontend
-cd ../frontend
+cd frontend
 npm install
 ```
 
 3. **Launch**
 
 ```bash
-# From project root, in one command:
-./launch.sh
-```
-
-Or run manually:
-
-```bash
 # Terminal 1 - Backend
-ollama serve &
 cd backend
-conda activate DiagWiki
-python main.py
+source venv/bin/activate
+python3 main.py
 
 # Terminal 2 - Frontend
 cd frontend
 npm run dev
 ```
 
-Access application at `http://localhost:5173` on default.
+Access the application at `http://localhost:5173`.
 
 ## Technical Stack
 
 **Why these choices?**
 
-- **Local Ollama + Python**: Privacy-first. Your code never leaves your machine. LLMs run locally without sending data to external APIs.
+- **Claude Code CLI**: Leverages your existing Claude Code subscription for high-quality diagram generation without additional API costs.
 
-- **Python + FastAPI**: Fast development for AI/RAG workflows. Direct integration with AdalFlow (RAG framework) and ChromaDB (vector database).
+- **Python + FastAPI**: Fast development for AI/RAG workflows. Direct integration with AdalFlow (RAG framework) and FAISS (vector search).
+
+- **Local Embeddings**: Uses sentence-transformers (all-MiniLM-L6-v2) for embeddings, running locally on CPU.
 
 - **Svelte**: Lightweight and fast. Clean component model without virtual DOM overhead. Perfect for interactive diagram rendering with Mermaid.js.
 
 - **Mermaid.js**: Industry-standard diagram syntax. Supports flowcharts, sequence diagrams, class diagrams, state diagrams, and ER diagrams.
 
 **Stack:**
-- Backend: Python, FastAPI, AdalFlow (RAG), Ollama (LLM)
+- Backend: Python, FastAPI, AdalFlow (RAG), Claude Code CLI (LLM), sentence-transformers (embeddings)
 - Frontend: SvelteKit, TypeScript, Mermaid.js
 
 ## License

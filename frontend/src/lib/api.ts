@@ -1,7 +1,8 @@
-// Use the same host as the frontend, but on port 8001
+// Use the same host as the frontend, with configurable backend port
+const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || '8001';
 export const API_BASE = typeof window !== 'undefined'
-	? `http://${window.location.hostname}:8001`
-	: 'http://localhost:8001';
+	? `http://${window.location.hostname}:${BACKEND_PORT}`
+	: `http://localhost:${BACKEND_PORT}`;
 
 export async function initWiki(rootPath: string) {
 	const response = await fetch(`${API_BASE}/initWiki`, {

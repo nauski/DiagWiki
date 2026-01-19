@@ -53,9 +53,10 @@ export async function loadConstants(): Promise<BackendConstants> {
 	// Create new load promise
 	loadPromise = (async () => {
 		try {
+			const backendPort = import.meta.env.VITE_BACKEND_PORT || '8001';
 			const apiBase = typeof window !== 'undefined'
-				? `http://${window.location.hostname}:8001`
-				: 'http://localhost:8001';
+				? `http://${window.location.hostname}:${backendPort}`
+				: `http://localhost:${backendPort}`;
 			const response = await fetch(`${apiBase}/constants`);
 			if (response.ok) {
 				const constants = await response.json();
